@@ -42,12 +42,10 @@ class CriticalAlertActivity : ComponentActivity() {
                     title = title,
                     message = message,
                     onAcknowledge = {
-                        val activeStore = ActiveAlertStore(applicationContext)
-                        val eventId = activeStore.get()
+                        val eventIds = ActiveAlertStore(applicationContext).drain()
                         CriticalAlarmService.stop(this)
-                        if (eventId.isNotBlank()) {
+                        eventIds.forEach { eventId ->
                             AckWorker.enqueue(applicationContext, eventId)
-                            activeStore.clear()
                         }
                         finishAndRemoveTask()
                     }
