@@ -1,0 +1,16 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+*.iml
+.DS_Store
+
+# Never commit secrets or service configuration
+google-services.json
+**/google-services.json
+*.jks
+*.keystore
+.env
+.env.*
+!.env.example
+secrets.properties
