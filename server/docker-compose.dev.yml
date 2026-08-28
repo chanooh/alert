@@ -1,0 +1,23 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.dev.conf:/mosquitto/config/mosquitto.conf:ro
+
+  alert-server:
+    build: .
+    depends_on:
+      - mqtt
+    env_file:
+      - .env
+    environment:
+      MQTT_URL: mqtt://mqtt:1883
+    ports:
+      - "8787:8787"
+    volumes:
+      - alert-data:/app/data
+
+volumes:
+  alert-data:
