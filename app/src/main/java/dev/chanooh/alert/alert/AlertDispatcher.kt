@@ -28,7 +28,8 @@ class AlertDispatcher(private val context: Context) {
                     context = context,
                     title = event.title,
                     message = event.message,
-                    volumePercent = settings.criticalVolumePercent
+                    volumePercent = settings.criticalVolumePercent,
+                    restoreVolume = settings.restoreVolumeAfterAck
                 )
             }
             AlertLevel.URGENT -> {
