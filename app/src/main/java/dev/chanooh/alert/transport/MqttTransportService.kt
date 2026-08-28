@@ -14,6 +14,7 @@ import dev.chanooh.alert.alert.AlertDispatcher
 import dev.chanooh.alert.alert.AlertEvent
 import dev.chanooh.alert.security.SecretStore
 import dev.chanooh.alert.settings.SettingsRepository
+import dev.chanooh.alert.system.GuardianMarker
 import java.net.URI
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -34,7 +35,10 @@ class MqttTransportService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOP -> stopTransport()
+            ACTION_STOP -> {
+                GuardianMarker.setEnabled(applicationContext, false)
+                stopTransport()
+            }
             else -> {
                 startForeground(NOTIFICATION_ID, buildNotification("Connecting…"))
                 scope.launch { connect() }
@@ -46,28 +50,51 @@ class MqttTransportService : Service() {
     private suspend fun connect() {
         val settings = SettingsRepository(applicationContext).settings.first()
         if (!settings.mqttEnabled || settings.mqttBroker.isBlank() || settings.deviceId.isBlank()) {
+            GuardianMarker.setEnabled(applicationContext, false)
             stopTransport()
             return
         }
+        GuardianMarker.setEnabled(applicationContext, true)
 
-        runCatching {
-            client?.disconnect()?.get(3, TimeUnit.SECONDS)
-        }
+        runCatching { client?.disconnect()?.get(3, TimeUnit.SECONDS) }
 
         val uri = URI(settings.mqttBroker)
         val secure = uri.scheme.equals("mqtts", ignoreCase = true)
         require(uri.scheme.equals("mqtt", true) || secure) { "MQTT URI must use mqtt:// or mqtts://" }
         val host = requireNotNull(uri.host) { "MQTT host is missing" }
         val port = if (uri.port > 0) uri.port else if (secure) 8883 else 1883
+        val topic = "alert/${settings.deviceId}/events"
 
+        lateinit var mqtt: Mqtt5AsyncClient
         val builder = MqttClient.builder()
             .identifier("alert-${settings.deviceId}")
             .serverHost(host)
             .serverPort(port)
             .automaticReconnectWithDefaultConfig()
-        if (secure) builder.sslWithDefaultConfig()
+            .addConnectedListener {
+                updateNotification("Armed · MQTT connected")
+                mqtt.subscribeWith()
+                    .topicFilter(topic)
+                    .qos(MqttQos.AT_LEAST_ONCE)
+                    .callback { publish ->
+                        scope.launch {
+                            runCatching {
+                                AlertDispatcher(applicationContext)
+                                    .handle(AlertEvent.fromJson(publish.payloadAsBytes))
+                            }
+                        }
+                    }
+                    .send()
+                    .whenComplete { _, error ->
+                        if (error != null) updateNotification("MQTT connected · subscription retrying")
+                    }
+            }
+            .addDisconnectedListener {
+                updateNotification("MQTT reconnecting")
+            }
 
-        val mqtt = builder.useMqttVersion5().buildAsync()
+        if (secure) builder.sslWithDefaultConfig()
+        mqtt = builder.useMqttVersion5().buildAsync()
         client = mqtt
 
         val connectBuilder = mqtt.connectWith()
@@ -81,23 +108,9 @@ class MqttTransportService : Service() {
                 .applySimpleAuth()
         }
 
-        try {
+        runCatching {
             connectBuilder.send().get(15, TimeUnit.SECONDS)
-            mqtt.subscribeWith()
-                .topicFilter("alert/${settings.deviceId}/events")
-                .qos(MqttQos.AT_LEAST_ONCE)
-                .callback { publish ->
-                    scope.launch {
-                        runCatching {
-                            AlertDispatcher(applicationContext)
-                                .handle(AlertEvent.fromJson(publish.payloadAsBytes))
-                        }
-                    }
-                }
-                .send()
-                .get(15, TimeUnit.SECONDS)
-            updateNotification("Armed · MQTT connected")
-        } catch (_: Throwable) {
+        }.onFailure {
             updateNotification("MQTT reconnecting")
         }
     }
@@ -145,8 +158,8 @@ class MqttTransportService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        private const val ACTION_START = "dev.chanooh.alert.action.START_MQTT"
-        private const val ACTION_STOP = "dev.chanooh.alert.action.STOP_MQTT"
+        const val ACTION_START = "dev.chanooh.alert.action.START_MQTT"
+        const val ACTION_STOP = "dev.chanooh.alert.action.STOP_MQTT"
         private const val CHANNEL_ID = "transport_status"
         private const val NOTIFICATION_ID = 8001
 
