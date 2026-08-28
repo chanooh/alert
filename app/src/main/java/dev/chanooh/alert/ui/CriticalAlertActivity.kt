@@ -21,6 +21,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.chanooh.alert.alarm.CriticalAlarmService
+import dev.chanooh.alert.alert.ActiveAlertStore
+import dev.chanooh.alert.network.AckWorker
 import dev.chanooh.alert.ui.theme.AlertTheme
 
 class CriticalAlertActivity : ComponentActivity() {
@@ -40,7 +42,13 @@ class CriticalAlertActivity : ComponentActivity() {
                     title = title,
                     message = message,
                     onAcknowledge = {
+                        val activeStore = ActiveAlertStore(applicationContext)
+                        val eventId = activeStore.get()
                         CriticalAlarmService.stop(this)
+                        if (eventId.isNotBlank()) {
+                            AckWorker.enqueue(applicationContext, eventId)
+                            activeStore.clear()
+                        }
                         finishAndRemoveTask()
                     }
                 )
@@ -76,15 +84,9 @@ private fun CriticalAlertScreen(
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(12.dp))
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyLarge
-            )
+            Text(text = message, style = MaterialTheme.typography.bodyLarge)
             Spacer(Modifier.height(40.dp))
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onAcknowledge
-            ) {
+            Button(modifier = Modifier.fillMaxWidth(), onClick = onAcknowledge) {
                 Text("Acknowledge & stop")
             }
         }
