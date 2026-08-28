@@ -23,6 +23,7 @@ class CriticalAlarmService : Service() {
     private var mediaPlayer: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var originalAlarmVolume: Int? = null
+    private var restoreVolumeAfterAck: Boolean = true
 
     override fun onCreate() {
         super.onCreate()
@@ -31,7 +32,11 @@ class CriticalAlarmService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOP -> stopAlert()
+            ACTION_STOP -> {
+                cleanup()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
             else -> startAlert(intent)
         }
         return START_NOT_STICKY
@@ -41,6 +46,7 @@ class CriticalAlarmService : Service() {
         val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "Critical alert" }
         val message = intent?.getStringExtra(EXTRA_MESSAGE).orEmpty().ifBlank { "Immediate attention required" }
         val volumePercent = intent?.getIntExtra(EXTRA_VOLUME_PERCENT, 100) ?: 100
+        restoreVolumeAfterAck = intent?.getBooleanExtra(EXTRA_RESTORE_VOLUME, true) ?: true
 
         startForeground(NOTIFICATION_ID, buildNotification(title, message))
         acquireWakeLock()
@@ -102,15 +108,19 @@ class CriticalAlarmService : Service() {
     private fun raiseAlarmVolume(percent: Int) {
         val audioManager = getSystemService(AudioManager::class.java)
         val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-        originalAlarmVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+        if (originalAlarmVolume == null) {
+            originalAlarmVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+        }
         val target = (max * percent.coerceIn(10, 100) / 100f).toInt().coerceAtLeast(1)
         audioManager.setStreamVolume(AudioManager.STREAM_ALARM, target, 0)
     }
 
-    private fun restoreAlarmVolume() {
+    private fun restoreAlarmVolumeIfNeeded() {
         val original = originalAlarmVolume ?: return
-        getSystemService(AudioManager::class.java)
-            .setStreamVolume(AudioManager.STREAM_ALARM, original, 0)
+        if (restoreVolumeAfterAck) {
+            getSystemService(AudioManager::class.java)
+                .setStreamVolume(AudioManager.STREAM_ALARM, original, 0)
+        }
         originalAlarmVolume = null
     }
 
@@ -152,20 +162,18 @@ class CriticalAlarmService : Service() {
         }
     }
 
-    private fun stopAlert() {
+    private fun cleanup() {
         mediaPlayer?.runCatching { stop() }
         mediaPlayer?.release()
         mediaPlayer = null
         stopVibration()
-        restoreAlarmVolume()
+        restoreAlarmVolumeIfNeeded()
         wakeLock?.takeIf { it.isHeld }?.release()
         wakeLock = null
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
     }
 
     override fun onDestroy() {
-        stopAlert()
+        cleanup()
         super.onDestroy()
     }
 
@@ -177,15 +185,23 @@ class CriticalAlarmService : Service() {
         const val EXTRA_TITLE = "title"
         const val EXTRA_MESSAGE = "message"
         const val EXTRA_VOLUME_PERCENT = "volume_percent"
+        const val EXTRA_RESTORE_VOLUME = "restore_volume"
         private const val CHANNEL_ID = "critical_alerts"
         private const val NOTIFICATION_ID = 9001
 
-        fun start(context: Context, title: String, message: String, volumePercent: Int = 100) {
+        fun start(
+            context: Context,
+            title: String,
+            message: String,
+            volumePercent: Int = 100,
+            restoreVolume: Boolean = true
+        ) {
             val intent = Intent(context, CriticalAlarmService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_MESSAGE, message)
                 putExtra(EXTRA_VOLUME_PERCENT, volumePercent)
+                putExtra(EXTRA_RESTORE_VOLUME, restoreVolume)
             }
             context.startForegroundService(intent)
         }
