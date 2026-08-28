@@ -99,6 +99,7 @@ class MqttTransportService : Service() {
 
         val connectBuilder = mqtt.connectWith()
             .cleanStart(false)
+            .sessionExpiryInterval(3_600)
             .keepAlive(300)
 
         if (settings.mqttUsername.isNotBlank()) {
