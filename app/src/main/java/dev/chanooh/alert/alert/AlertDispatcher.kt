@@ -19,31 +19,41 @@ class AlertDispatcher(private val context: Context) {
         val settings = SettingsRepository(context).settings.first()
         val secret = SecretStore(context).getDeviceHmacSecret()
         if (!AlertVerifier.verify(event, settings.deviceId, secret)) return
-        if (deduplicator.seenOrMark(event.id)) return
+        if (!deduplicator.tryReserve(event.id)) return
 
-        when (event.level) {
-            AlertLevel.CRITICAL -> {
-                activeStore.set(event.id)
-                CriticalAlarmService.start(
-                    context = context,
-                    title = event.title,
-                    message = event.message,
-                    volumePercent = settings.criticalVolumePercent,
-                    restoreVolume = settings.restoreVolumeAfterAck
-                )
+        try {
+            when (event.level) {
+                AlertLevel.CRITICAL -> {
+                    activeStore.add(event.id)
+                    try {
+                        CriticalAlarmService.start(
+                            context = context,
+                            title = event.title,
+                            message = event.message,
+                            volumePercent = settings.criticalVolumePercent,
+                            restoreVolume = settings.restoreVolumeAfterAck
+                        )
+                    } catch (error: Throwable) {
+                        activeStore.remove(event.id)
+                        throw error
+                    }
+                }
+                AlertLevel.URGENT -> {
+                    showNotification(event, NotificationManager.IMPORTANCE_HIGH)
+                    AckWorker.enqueue(context, event.id)
+                }
+                AlertLevel.WARNING -> {
+                    showNotification(event, NotificationManager.IMPORTANCE_DEFAULT)
+                    AckWorker.enqueue(context, event.id)
+                }
+                AlertLevel.INFO -> {
+                    showNotification(event, NotificationManager.IMPORTANCE_LOW)
+                    AckWorker.enqueue(context, event.id)
+                }
             }
-            AlertLevel.URGENT -> {
-                showNotification(event, NotificationManager.IMPORTANCE_HIGH)
-                AckWorker.enqueue(context, event.id)
-            }
-            AlertLevel.WARNING -> {
-                showNotification(event, NotificationManager.IMPORTANCE_DEFAULT)
-                AckWorker.enqueue(context, event.id)
-            }
-            AlertLevel.INFO -> {
-                showNotification(event, NotificationManager.IMPORTANCE_LOW)
-                AckWorker.enqueue(context, event.id)
-            }
+        } catch (error: Throwable) {
+            deduplicator.forget(event.id)
+            throw error
         }
     }
 
