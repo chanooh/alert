@@ -49,20 +49,18 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import dev.chanooh.alert.alarm.CriticalAlarmService
+import dev.chanooh.alert.security.SecretStore
 import dev.chanooh.alert.settings.AppSettings
 import dev.chanooh.alert.settings.SettingsRepository
 import dev.chanooh.alert.settings.redacted
+import dev.chanooh.alert.transport.MqttTransportService
 import dev.chanooh.alert.ui.theme.AlertTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            AlertTheme {
-                AlertHome()
-            }
-        }
+        setContent { AlertTheme { AlertHome() } }
     }
 }
 
@@ -71,21 +69,32 @@ class MainActivity : ComponentActivity() {
 private fun AlertHome() {
     val context = LocalContext.current
     val repository = remember { SettingsRepository(context.applicationContext) }
+    val secretStore = remember { SecretStore(context.applicationContext) }
     val persisted by repository.settings.collectAsState(initial = AppSettings())
     val scope = rememberCoroutineScope()
 
     var serverUrl by remember { mutableStateOf("") }
     var mqttBroker by remember { mutableStateOf("") }
+    var mqttUsername by remember { mutableStateOf("") }
+    var mqttPassword by remember { mutableStateOf("") }
+    var mqttEnabled by remember { mutableStateOf(false) }
     var deviceId by remember { mutableStateOf("") }
+    var deviceApiToken by remember { mutableStateOf("") }
+    var deviceHmacSecret by remember { mutableStateOf("") }
     var volume by remember { mutableStateOf(100f) }
     var restoreVolume by remember { mutableStateOf(true) }
     var loaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(persisted) {
-        if (!loaded || persisted != AppSettings()) {
+        if (!loaded) {
             serverUrl = persisted.serverBaseUrl
             mqttBroker = persisted.mqttBroker
+            mqttUsername = persisted.mqttUsername
+            mqttEnabled = persisted.mqttEnabled
             deviceId = persisted.deviceId
+            mqttPassword = secretStore.getMqttPassword()
+            deviceApiToken = secretStore.getDeviceApiToken()
+            deviceHmacSecret = secretStore.getDeviceHmacSecret()
             volume = persisted.criticalVolumePercent.toFloat()
             restoreVolume = persisted.restoreVolumeAfterAck
             loaded = true
@@ -96,9 +105,7 @@ private fun AlertHome() {
         ActivityResultContracts.RequestPermission()
     ) { }
 
-    Scaffold(
-        topBar = { TopAppBar(title = { Text("Alert") }) }
-    ) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text("Alert") }) }) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -109,6 +116,7 @@ private fun AlertHome() {
         ) {
             StatusCard(
                 serverConfigured = persisted.serverBaseUrl.isNotBlank(),
+                mqttConfigured = persisted.mqttBroker.isNotBlank() && persisted.deviceId.isNotBlank(),
                 dndAccess = context.getSystemService(NotificationManager::class.java)
                     .isNotificationPolicyAccessGranted,
                 notificationsAllowed = Build.VERSION.SDK_INT < 33 ||
@@ -116,106 +124,97 @@ private fun AlertHome() {
             )
 
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Connection", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        "Values are entered on-device. No production endpoint or device credential is stored in the repository.",
+                        "Endpoints are entered only on this device. Secrets are encrypted with Android Keystore and are never committed to Git.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     OutlinedTextField(
-                        value = serverUrl,
-                        onValueChange = { serverUrl = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Server base URL") },
-                        placeholder = { Text("https://your-server.example") },
-                        singleLine = true
+                        serverUrl, { serverUrl = it }, Modifier.fillMaxWidth(),
+                        label = { Text("Server base URL") }, placeholder = { Text("https://your-server.example") }, singleLine = true
                     )
                     OutlinedTextField(
-                        value = mqttBroker,
-                        onValueChange = { mqttBroker = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("MQTT broker (optional)") },
-                        placeholder = { Text("mqtts://broker.example:8883") },
-                        singleLine = true
+                        mqttBroker, { mqttBroker = it }, Modifier.fillMaxWidth(),
+                        label = { Text("MQTT broker") }, placeholder = { Text("mqtts://broker.example:8883") }, singleLine = true
                     )
                     OutlinedTextField(
-                        value = deviceId,
-                        onValueChange = { deviceId = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Device ID") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true
+                        mqttUsername, { mqttUsername = it }, Modifier.fillMaxWidth(),
+                        label = { Text("MQTT username (optional)") }, singleLine = true
                     )
+                    SecretField("MQTT password (optional)", mqttPassword) { mqttPassword = it }
+                    SecretField("Device ID", deviceId) { deviceId = it }
+                    SecretField("Device API token", deviceApiToken) { deviceApiToken = it }
+                    SecretField("Device HMAC secret", deviceHmacSecret) { deviceHmacSecret = it }
                     Text("Saved device: ${persisted.deviceId.redacted()}", style = MaterialTheme.typography.bodySmall)
 
-                    HorizontalDivider()
-                    Text("Critical volume: ${volume.toInt()}%")
-                    Slider(
-                        value = volume,
-                        onValueChange = { volume = it },
-                        valueRange = 10f..100f
-                    )
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Restore previous alarm volume after ACK")
+                        Column(Modifier.weight(1f)) {
+                            Text("Self-hosted MQTT transport")
+                            Text("300s keepalive · QoS 1 · signed events", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = mqttEnabled, onCheckedChange = { mqttEnabled = it })
+                    }
+
+                    HorizontalDivider()
+                    Text("Critical volume: ${volume.toInt()}%")
+                    Slider(value = volume, onValueChange = { volume = it }, valueRange = 10f..100f)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Restore alarm volume after ACK", modifier = Modifier.weight(1f))
                         Switch(checked = restoreVolume, onCheckedChange = { restoreVolume = it })
                     }
+
                     Button(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             scope.launch {
+                                secretStore.setMqttPassword(mqttPassword)
+                                secretStore.setDeviceApiToken(deviceApiToken)
+                                secretStore.setDeviceHmacSecret(deviceHmacSecret)
                                 repository.save(
                                     AppSettings(
                                         serverBaseUrl = serverUrl,
                                         mqttBroker = mqttBroker,
+                                        mqttUsername = mqttUsername,
+                                        mqttEnabled = mqttEnabled,
                                         deviceId = deviceId,
                                         criticalVolumePercent = volume.toInt(),
                                         restoreVolumeAfterAck = restoreVolume
                                     )
                                 )
+                                if (mqttEnabled) MqttTransportService.start(context) else MqttTransportService.stop(context)
                             }
                         }
-                    ) { Text("Save configuration") }
+                    ) { Text("Save & apply") }
                 }
             }
 
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Reliability permissions", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            if (Build.VERSION.SDK_INT >= 33) {
-                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            } else {
-                                context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                })
-                            }
-                        }
-                    ) { Text("Notification permission") }
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
-                    ) { Text("Do Not Disturb access") }
+                    Button(Modifier.fillMaxWidth(), onClick = {
+                        if (Build.VERSION.SDK_INT >= 33) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        else context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        })
+                    }) { Text("Notification permission") }
+                    Button(Modifier.fillMaxWidth(), onClick = {
+                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+                    }) { Text("Do Not Disturb access") }
                     if (Build.VERSION.SDK_INT >= 34) {
-                        Button(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = {
-                                context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
-                                    data = Uri.parse("package:${context.packageName}")
-                                })
-                            }
-                        ) { Text("Full-screen alert access") }
+                        Button(Modifier.fillMaxWidth(), onClick = {
+                            context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            })
+                        }) { Text("Full-screen alert access") }
                     }
                 }
             }
@@ -224,38 +223,48 @@ private fun AlertHome() {
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     CriticalAlarmService.start(
-                        context = context,
-                        title = "Critical test",
-                        message = "If you can hear this with DND enabled and the screen locked, the critical path is working.",
-                        volumePercent = persisted.criticalVolumePercent
+                        context,
+                        "Critical test",
+                        "Lock the screen, enable DND, and mute normal notifications to verify the alarm path.",
+                        persisted.criticalVolumePercent
                     )
                 }
-            ) {
-                Text("TEST CRITICAL ALERT")
-            }
+            ) { Text("TEST CRITICAL ALERT") }
             Spacer(Modifier.height(16.dp))
         }
     }
 }
 
 @Composable
+private fun SecretField(label: String, value: String, onValueChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) },
+        visualTransformation = PasswordVisualTransformation(),
+        singleLine = true
+    )
+}
+
+@Composable
 private fun StatusCard(
     serverConfigured: Boolean,
+    mqttConfigured: Boolean,
     dndAccess: Boolean,
     notificationsAllowed: Boolean
 ) {
+    val armed = serverConfigured && mqttConfigured && dndAccess && notificationsAllowed
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("System status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             StatusLine("Server", serverConfigured)
+            StatusLine("MQTT", mqttConfigured)
             StatusLine("Notifications", notificationsAllowed)
             StatusLine("DND policy access", dndAccess)
             Text(
-                if (serverConfigured && notificationsAllowed && dndAccess) "ARMED" else "SETUP REQUIRED",
-                color = if (serverConfigured && notificationsAllowed && dndAccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                if (armed) "ARMED" else "SETUP REQUIRED",
+                color = if (armed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -264,10 +273,7 @@ private fun StatusCard(
 
 @Composable
 private fun StatusLine(label: String, ok: Boolean) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label)
         Text(if (ok) "OK" else "Needs attention", fontWeight = FontWeight.Medium)
     }
