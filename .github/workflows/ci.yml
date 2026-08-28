@@ -50,3 +50,19 @@ jobs:
           name: alert-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+  guardian:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package KernelSU module
+        run: |
+          cd root/alert-guardian
+          chmod 0755 service.sh action.sh
+          zip -r ../../alert-guardian-kernelsu.zip module.prop skip_mount service.sh action.sh README.md
+      - name: Upload KernelSU module
+        uses: actions/upload-artifact@v4
+        with:
+          name: alert-guardian-kernelsu
+          path: alert-guardian-kernelsu.zip
+          if-no-files-found: error
