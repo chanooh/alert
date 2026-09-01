@@ -188,11 +188,7 @@ class UrgentAlertService : Service() {
         }
 
         fun stop(context: Context) {
-            runCatching {
-                context.startService(Intent(context, UrgentAlertService::class.java).apply {
-                    action = ACTION_STOP
-                })
-            }
+            context.stopService(Intent(context, UrgentAlertService::class.java))
         }
     }
 }
