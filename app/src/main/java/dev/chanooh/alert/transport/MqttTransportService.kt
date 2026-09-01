@@ -19,6 +19,7 @@ import java.net.URI
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
@@ -27,6 +28,7 @@ import kotlinx.coroutines.launch
 class MqttTransportService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var client: Mqtt5AsyncClient? = null
+    private var connectJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -41,10 +43,23 @@ class MqttTransportService : Service() {
             }
             else -> {
                 startForeground(NOTIFICATION_ID, buildNotification("Connecting…"))
-                scope.launch { connect() }
+                connectJob?.cancel()
+                connectJob = scope.launch { connectSafely() }
             }
         }
         return START_STICKY
+    }
+
+    private suspend fun connectSafely() {
+        runCatching { connect() }
+            .onFailure {
+                GuardianMarker.setEnabled(applicationContext, false)
+                updateNotification("Configuration error · open Alert to fix")
+                runCatching { client?.disconnect() }
+                client = null
+                stopForeground(STOP_FOREGROUND_DETACH)
+                stopSelf()
+            }
     }
 
     private suspend fun connect() {
@@ -54,9 +69,6 @@ class MqttTransportService : Service() {
             stopTransport()
             return
         }
-        GuardianMarker.setEnabled(applicationContext, true)
-
-        runCatching { client?.disconnect()?.get(3, TimeUnit.SECONDS) }
 
         val uri = URI(settings.mqttBroker)
         val secure = uri.scheme.equals("mqtts", ignoreCase = true)
@@ -65,6 +77,9 @@ class MqttTransportService : Service() {
         val port = if (uri.port > 0) uri.port else if (secure) 8883 else 1883
         val topic = "alert/${settings.deviceId}/events"
 
+        runCatching { client?.disconnect()?.get(3, TimeUnit.SECONDS) }
+        client = null
+
         lateinit var mqtt: Mqtt5AsyncClient
         val builder = MqttClient.builder()
             .identifier("alert-${settings.deviceId}")
@@ -72,6 +87,7 @@ class MqttTransportService : Service() {
             .serverPort(port)
             .automaticReconnectWithDefaultConfig()
             .addConnectedListener {
+                GuardianMarker.setEnabled(applicationContext, true)
                 updateNotification("Armed · MQTT connected")
                 mqtt.subscribeWith()
                     .topicFilter(topic)
@@ -109,9 +125,12 @@ class MqttTransportService : Service() {
                 .applySimpleAuth()
         }
 
+        GuardianMarker.setEnabled(applicationContext, true)
         runCatching {
             connectBuilder.send().get(15, TimeUnit.SECONDS)
         }.onFailure {
+            // Network/broker availability failures are transient: keep the marker
+            // enabled so HiveMQ auto-reconnect and KernelSU Guardian can recover.
             updateNotification("MQTT reconnecting")
         }
     }
@@ -144,6 +163,8 @@ class MqttTransportService : Service() {
     }
 
     private fun stopTransport() {
+        connectJob?.cancel()
+        connectJob = null
         runCatching { client?.disconnect() }
         client = null
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -151,7 +172,10 @@ class MqttTransportService : Service() {
     }
 
     override fun onDestroy() {
+        connectJob?.cancel()
+        connectJob = null
         runCatching { client?.disconnect() }
+        client = null
         scope.cancel()
         super.onDestroy()
     }
