@@ -43,10 +43,13 @@ class CriticalAlertActivity : ComponentActivity() {
                     message = message,
                     onAcknowledge = {
                         val eventIds = ActiveAlertStore(applicationContext).drain()
-                        CriticalAlarmService.stop(this)
+                        // Persist ACK work before stopping the alarm service. If the
+                        // process is killed immediately after the tap, WorkManager
+                        // has the best chance to retain the user's acknowledgement.
                         eventIds.forEach { eventId ->
                             AckWorker.enqueue(applicationContext, eventId)
                         }
+                        CriticalAlarmService.stop(this)
                         finishAndRemoveTask()
                     }
                 )
