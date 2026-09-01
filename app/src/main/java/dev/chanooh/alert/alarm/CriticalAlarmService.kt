@@ -45,8 +45,8 @@ class CriticalAlarmService : Service() {
     }
 
     private fun startAlert(intent: Intent?) {
-        val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "Critical alert" }
-        val message = intent?.getStringExtra(EXTRA_MESSAGE).orEmpty().ifBlank { "Immediate attention required" }
+        val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "Critical 告警" }
+        val message = intent?.getStringExtra(EXTRA_MESSAGE).orEmpty().ifBlank { "需要立即处理" }
         val volumePercent = intent?.getIntExtra(EXTRA_VOLUME_PERCENT, 100) ?: 100
         restoreVolumeAfterAck = intent?.getBooleanExtra(EXTRA_RESTORE_VOLUME, true) ?: true
         val rootDndOverride = intent?.getBooleanExtra(EXTRA_ROOT_DND_OVERRIDE, false) ?: false
@@ -92,10 +92,10 @@ class CriticalAlarmService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Critical alerts",
+            "Critical 告警",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Full-screen alarm-style alerts requiring acknowledgement"
+            description = "需要确认的全屏闹钟式告警"
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             setSound(null, null)
             enableVibration(false)

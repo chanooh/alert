@@ -87,7 +87,12 @@ class AlertDispatcher(private val context: Context) {
         manager.createNotificationChannel(
             NotificationChannel(
                 channelId,
-                event.level.name.lowercase().replaceFirstChar { it.uppercase() },
+                when (event.level) {
+                    AlertLevel.INFO -> "Info 通知"
+                    AlertLevel.WARNING -> "Warning 告警"
+                    AlertLevel.URGENT -> "Urgent 告警"
+                    AlertLevel.CRITICAL -> "Critical 告警"
+                },
                 importance
             ).apply {
                 enableVibration(vibrate)

@@ -44,8 +44,8 @@ class UrgentAlertService : Service() {
     }
 
     private fun startAlert(intent: Intent?) {
-        val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "Urgent alert" }
-        val message = intent?.getStringExtra(EXTRA_MESSAGE).orEmpty().ifBlank { "Attention required" }
+        val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "Urgent 告警" }
+        val message = intent?.getStringExtra(EXTRA_MESSAGE).orEmpty().ifBlank { "需要关注" }
         val volumePercent = intent?.getIntExtra(EXTRA_VOLUME_PERCENT, DEFAULT_VOLUME_PERCENT)
             ?: DEFAULT_VOLUME_PERCENT
 
@@ -72,10 +72,10 @@ class UrgentAlertService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "Urgent alerts",
+                "Urgent 告警",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Short loud alerts with repeating vibration"
+                description = "短时高音量并持续震动的告警"
                 setSound(null, null)
                 enableVibration(false)
             }

@@ -130,14 +130,14 @@ class MqttTransportService : Service() {
         }.onFailure {
             // Network/broker availability failures are transient: keep the marker
             // enabled so HiveMQ auto-reconnect and KernelSU Guardian can recover.
-            updateNotification("MQTT reconnecting")
+            updateNotification("MQTT 正在重连")
         }
     }
 
     private fun buildNotification(text: String): Notification =
         Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("Alert transport")
+            .setContentTitle("告警通道")
             .setContentText(text)
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_SERVICE)
@@ -152,10 +152,10 @@ class MqttTransportService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "Alert transport",
+                "告警通道",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Low-idle self-hosted MQTT transport status"
+                description = "低功耗自建 MQTT 通道状态"
                 setSound(null, null)
             }
         )

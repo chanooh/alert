@@ -112,7 +112,7 @@ private fun AlertHome() {
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     val fullScreenAllowed = Build.VERSION.SDK_INT < 34 || notificationManager.canUseFullScreenIntent()
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Alert") }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text("告警") }) }) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -131,28 +131,28 @@ private fun AlertHome() {
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Connection", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("连接设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        "Endpoints are entered only on this device. Secrets are encrypted with Android Keystore and are never committed to Git.",
+                        "地址只在本机填写。密钥由 Android Keystore 加密保存，永远不会提交到 Git。",
                         style = MaterialTheme.typography.bodySmall
                     )
                     OutlinedTextField(
                         serverUrl, { serverUrl = it }, Modifier.fillMaxWidth(),
-                        label = { Text("Server base URL") }, placeholder = { Text("https://your-server.example") }, singleLine = true
+                        label = { Text("服务器地址") }, placeholder = { Text("https://your-server.example") }, singleLine = true
                     )
                     OutlinedTextField(
                         mqttBroker, { mqttBroker = it }, Modifier.fillMaxWidth(),
-                        label = { Text("MQTT broker") }, placeholder = { Text("mqtts://broker.example:8883") }, singleLine = true
+                        label = { Text("MQTT 代理地址") }, placeholder = { Text("mqtts://broker.example:8883") }, singleLine = true
                     )
                     OutlinedTextField(
                         mqttUsername, { mqttUsername = it }, Modifier.fillMaxWidth(),
-                        label = { Text("MQTT username (optional)") }, singleLine = true
+                        label = { Text("MQTT 用户名（可选）") }, singleLine = true
                     )
-                    SecretField("MQTT password (optional)", mqttPassword) { mqttPassword = it }
-                    SecretField("Device ID", deviceId) { deviceId = it }
-                    SecretField("Device API token", deviceApiToken) { deviceApiToken = it }
-                    SecretField("Device HMAC secret", deviceHmacSecret) { deviceHmacSecret = it }
-                    Text("Saved device: ${persisted.deviceId.redacted()}", style = MaterialTheme.typography.bodySmall)
+                    SecretField("MQTT 密码（可选）", mqttPassword) { mqttPassword = it }
+                    SecretField("设备 ID", deviceId) { deviceId = it }
+                    SecretField("设备 API Token", deviceApiToken) { deviceApiToken = it }
+                    SecretField("设备 HMAC 密钥", deviceHmacSecret) { deviceHmacSecret = it }
+                    Text("已保存设备：${persisted.deviceId.redacted()}", style = MaterialTheme.typography.bodySmall)
 
                     Row(
                         Modifier.fillMaxWidth(),
@@ -160,21 +160,21 @@ private fun AlertHome() {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Self-hosted MQTT transport")
-                            Text("300s keepalive · QoS 1 · signed events", style = MaterialTheme.typography.bodySmall)
+                            Text("自建 MQTT 通道")
+                            Text("300 秒保活 · QoS 1 · 事件签名", style = MaterialTheme.typography.bodySmall)
                         }
                         Switch(checked = mqttEnabled, onCheckedChange = { mqttEnabled = it })
                     }
 
                     HorizontalDivider()
-                    Text("Critical volume: ${volume.toInt()}%")
+                    Text("Critical 音量：${volume.toInt()}%")
                     Slider(value = volume, onValueChange = { volume = it }, valueRange = 10f..100f)
                     Row(
                         Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Restore alarm volume after ACK", modifier = Modifier.weight(1f))
+                        Text("ACK 后恢复闹钟音量", modifier = Modifier.weight(1f))
                         Switch(checked = restoreVolume, onCheckedChange = { restoreVolume = it })
                     }
                     Row(
@@ -183,9 +183,9 @@ private fun AlertHome() {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Root override for Do Not Disturb")
+                            Text("Root 免打扰覆盖")
                             Text(
-                                "Optional KernelSU path. While critical is active, any DND filter is temporarily disabled and its filter level is restored after ACK. Grant Alert root access in KernelSU first.",
+                                "可选的 KernelSU 路径。Critical 告警期间会临时关闭免打扰，并在 ACK 后恢复原有级别。请先在 KernelSU 中授予告警应用 Root 权限。",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -214,13 +214,13 @@ private fun AlertHome() {
                                 if (mqttEnabled) MqttTransportService.start(context) else MqttTransportService.stop(context)
                             }
                         }
-                    ) { Text("Save & apply") }
+                    ) { Text("保存并应用") }
                 }
             }
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Reliability permissions", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("可靠性权限", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Button(
                         onClick = {
                             if (Build.VERSION.SDK_INT >= 33) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -229,13 +229,13 @@ private fun AlertHome() {
                             })
                         },
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("Notification permission") }
+                    ) { Text("通知权限") }
                     Button(
                         onClick = {
                             context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
                         },
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("Do Not Disturb access") }
+                    ) { Text("免打扰访问权限") }
                     if (Build.VERSION.SDK_INT >= 34) {
                         Button(
                             onClick = {
@@ -244,7 +244,7 @@ private fun AlertHome() {
                                 })
                             },
                             modifier = Modifier.fillMaxWidth()
-                        ) { Text("Full-screen alert access") }
+                        ) { Text("全屏提醒权限") }
                     }
                 }
             }
@@ -254,14 +254,14 @@ private fun AlertHome() {
                 onClick = {
                     CriticalAlarmService.start(
                         context = context,
-                        title = "Critical test",
-                        message = "Lock the screen, enable DND, and mute normal notifications to verify the alarm path.",
+                        title = "Critical 测试",
+                        message = "锁定屏幕、开启免打扰并静音普通通知，以验证告警路径。",
                         volumePercent = persisted.criticalVolumePercent,
                         restoreVolume = persisted.restoreVolumeAfterAck,
                         rootDndOverride = persisted.rootDndOverrideEnabled
                     )
                 }
-            ) { Text("TEST CRITICAL ALERT") }
+            ) { Text("测试 Critical 告警") }
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -290,14 +290,14 @@ private fun StatusCard(
     val armed = serverConfigured && mqttConfigured && dndAccess && notificationsAllowed && fullScreenAllowed
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("System status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            StatusLine("Server", serverConfigured)
+            Text("系统状态", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            StatusLine("服务器", serverConfigured)
             StatusLine("MQTT", mqttConfigured)
-            StatusLine("Notifications", notificationsAllowed)
-            StatusLine("DND policy access", dndAccess)
-            StatusLine("Full-screen alerts", fullScreenAllowed)
+            StatusLine("通知", notificationsAllowed)
+            StatusLine("免打扰权限", dndAccess)
+            StatusLine("全屏提醒", fullScreenAllowed)
             Text(
-                if (armed) "ARMED" else "SETUP REQUIRED",
+                if (armed) "已就绪" else "需要设置",
                 color = if (armed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                 fontWeight = FontWeight.Bold
             )
@@ -309,6 +309,6 @@ private fun StatusCard(
 private fun StatusLine(label: String, ok: Boolean) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label)
-        Text(if (ok) "OK" else "Needs attention", fontWeight = FontWeight.Medium)
+        Text(if (ok) "正常" else "需要处理", fontWeight = FontWeight.Medium)
     }
 }

@@ -32,9 +32,9 @@ class CriticalAlertActivity : ComponentActivity() {
         setTurnScreenOn(true)
 
         val title = intent.getStringExtra(CriticalAlarmService.EXTRA_TITLE).orEmpty()
-            .ifBlank { "Critical alert" }
+            .ifBlank { "Critical 告警" }
         val message = intent.getStringExtra(CriticalAlarmService.EXTRA_MESSAGE).orEmpty()
-            .ifBlank { "Immediate attention required" }
+            .ifBlank { "需要立即处理" }
 
         setContent {
             AlertTheme {
@@ -73,7 +73,7 @@ private fun CriticalAlertScreen(
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "CRITICAL",
+                text = "严重告警",
                 color = MaterialTheme.colorScheme.error,
                 fontWeight = FontWeight.Black,
                 fontSize = 36.sp
@@ -88,7 +88,7 @@ private fun CriticalAlertScreen(
             Text(text = message, style = MaterialTheme.typography.bodyLarge)
             Spacer(Modifier.height(40.dp))
             Button(modifier = Modifier.fillMaxWidth(), onClick = onAcknowledge) {
-                Text("Acknowledge & stop")
+                Text("确认并停止")
             }
         }
     }
