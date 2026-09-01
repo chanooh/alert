@@ -83,6 +83,7 @@ private fun AlertHome() {
     var deviceHmacSecret by remember { mutableStateOf("") }
     var volume by remember { mutableStateOf(100f) }
     var restoreVolume by remember { mutableStateOf(true) }
+    var rootDndOverride by remember { mutableStateOf(false) }
     var loaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(persisted) {
@@ -97,6 +98,7 @@ private fun AlertHome() {
             deviceHmacSecret = secretStore.getDeviceHmacSecret()
             volume = persisted.criticalVolumePercent.toFloat()
             restoreVolume = persisted.restoreVolumeAfterAck
+            rootDndOverride = persisted.rootDndOverrideEnabled
             loaded = true
         }
     }
@@ -171,6 +173,20 @@ private fun AlertHome() {
                         Text("Restore alarm volume after ACK", modifier = Modifier.weight(1f))
                         Switch(checked = restoreVolume, onCheckedChange = { restoreVolume = it })
                     }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Root override for Total Silence")
+                            Text(
+                                "Optional KernelSU path. If Android is in total-silence DND, critical alerts temporarily disable it and restore it after ACK.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Switch(checked = rootDndOverride, onCheckedChange = { rootDndOverride = it })
+                    }
 
                     Button(
                         modifier = Modifier.fillMaxWidth(),
@@ -187,7 +203,8 @@ private fun AlertHome() {
                                         mqttEnabled = mqttEnabled,
                                         deviceId = deviceId,
                                         criticalVolumePercent = volume.toInt(),
-                                        restoreVolumeAfterAck = restoreVolume
+                                        restoreVolumeAfterAck = restoreVolume,
+                                        rootDndOverrideEnabled = rootDndOverride
                                     )
                                 )
                                 if (mqttEnabled) MqttTransportService.start(context) else MqttTransportService.stop(context)
@@ -232,10 +249,12 @@ private fun AlertHome() {
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     CriticalAlarmService.start(
-                        context,
-                        "Critical test",
-                        "Lock the screen, enable DND, and mute normal notifications to verify the alarm path.",
-                        persisted.criticalVolumePercent
+                        context = context,
+                        title = "Critical test",
+                        message = "Lock the screen, enable DND, and mute normal notifications to verify the alarm path.",
+                        volumePercent = persisted.criticalVolumePercent,
+                        restoreVolume = persisted.restoreVolumeAfterAck,
+                        rootDndOverride = persisted.rootDndOverrideEnabled
                     )
                 }
             ) { Text("TEST CRITICAL ALERT") }
