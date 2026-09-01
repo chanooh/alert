@@ -20,11 +20,9 @@ object RootDndController {
         if (manager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_NONE) {
             return null
         }
-        return if (runRootCommand("cmd notification set_dnd off")) {
-            RestoreMode.TOTAL_SILENCE
-        } else {
-            null
-        }
+        val disabled = runRootCommand("cmd notification set_dnd off") ||
+            runRootCommand("cmd notification set_dnd all")
+        return if (disabled) RestoreMode.TOTAL_SILENCE else null
     }
 
     fun restore(mode: RestoreMode?) {
