@@ -5,24 +5,21 @@ import android.content.Context
 class ActiveAlertStore(context: Context) {
     private val prefs = context.getSharedPreferences("active_alert", Context.MODE_PRIVATE)
 
-    @Synchronized
-    fun add(eventId: String) {
-        if (eventId.isBlank()) return
+    fun add(eventId: String) = synchronized(LOCK) {
+        if (eventId.isBlank()) return@synchronized
         val ids = readIds().toMutableList()
         if (eventId !in ids) ids.add(eventId)
         writeIds(ids)
     }
 
-    @Synchronized
-    fun remove(eventId: String) {
+    fun remove(eventId: String) = synchronized(LOCK) {
         writeIds(readIds().filterNot { it == eventId })
     }
 
-    @Synchronized
-    fun drain(): List<String> {
+    fun drain(): List<String> = synchronized(LOCK) {
         val ids = readIds()
         prefs.edit().remove(KEY_EVENT_IDS).commit()
-        return ids
+        ids
     }
 
     private fun readIds(): List<String> = prefs.getString(KEY_EVENT_IDS, "")
@@ -37,6 +34,7 @@ class ActiveAlertStore(context: Context) {
     }
 
     private companion object {
+        val LOCK = Any()
         const val KEY_EVENT_IDS = "event_ids"
     }
 }
