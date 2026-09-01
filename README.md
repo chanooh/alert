@@ -109,6 +109,36 @@ curl -X POST http://127.0.0.1:8787/api/alerts \
   -d '{"level":"critical","title":"Test","message":"Critical path test"}'
 ```
 
+### Temporary development deployment (test only)
+
+For a short, isolated test on a disposable host, the development Compose stack can
+build and run both the alert server and Mosquitto without a local Node or Android
+build:
+
+```bash
+git clone --branch feature/initial-alert-app https://github.com/chanooh/alert.git alert
+cd alert/server
+cp .env.example .env
+# Fill .env with newly generated test-only values; never commit this file.
+docker compose -f docker-compose.dev.yml up -d --build
+curl http://YOUR_SERVER_IP:8787/health
+```
+
+Configure the app with `http://YOUR_SERVER_IP:8787` and
+`mqtt://YOUR_SERVER_IP:1883`, using the same test device ID, API token, and HMAC
+secret as the server `.env`. Stop the stack as soon as testing is complete:
+
+```bash
+docker compose -f docker-compose.dev.yml down
+```
+
+This stack intentionally uses anonymous, plaintext MQTT and HTTP. It is suitable
+only for a brief, access-controlled lab test; do not expose it to an untrusted
+network or use real credentials, personal events, or a daily-use deployment.
+Production use requires authenticated MQTT over TLS (`mqtts://`), HTTPS, firewall
+or VPN restrictions, rotated secrets, and a separately reviewed deployment
+configuration.
+
 ## Automated verification and CI artifacts
 
 `.github/workflows/ci.yml` runs on `main` and `feature/**` pushes and on pull requests. A branch is not considered build-verified until the workflow for that exact head commit is green.
