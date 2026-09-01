@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import dev.chanooh.alert.alarm.CriticalAlarmService
+import dev.chanooh.alert.alarm.UrgentAlertService
 import dev.chanooh.alert.network.AckWorker
 import dev.chanooh.alert.security.AlertVerifier
 import dev.chanooh.alert.security.SecretStore
@@ -24,6 +25,7 @@ class AlertDispatcher(private val context: Context) {
         try {
             when (event.level) {
                 AlertLevel.CRITICAL -> {
+                    UrgentAlertService.stop(context)
                     activeStore.add(event.id)
                     try {
                         CriticalAlarmService.start(
@@ -31,7 +33,8 @@ class AlertDispatcher(private val context: Context) {
                             title = event.title,
                             message = event.message,
                             volumePercent = settings.criticalVolumePercent,
-                            restoreVolume = settings.restoreVolumeAfterAck
+                            restoreVolume = settings.restoreVolumeAfterAck,
+                            rootDndOverride = settings.rootDndOverrideEnabled
                         )
                     } catch (error: Throwable) {
                         activeStore.remove(event.id)
@@ -39,15 +42,20 @@ class AlertDispatcher(private val context: Context) {
                     }
                 }
                 AlertLevel.URGENT -> {
-                    showNotification(event, NotificationManager.IMPORTANCE_HIGH)
+                    UrgentAlertService.start(
+                        context = context,
+                        title = event.title,
+                        message = event.message,
+                        volumePercent = settings.criticalVolumePercent
+                    )
                     AckWorker.enqueue(context, event.id)
                 }
                 AlertLevel.WARNING -> {
-                    showNotification(event, NotificationManager.IMPORTANCE_DEFAULT)
+                    showNotification(event, NotificationManager.IMPORTANCE_DEFAULT, vibrate = true)
                     AckWorker.enqueue(context, event.id)
                 }
                 AlertLevel.INFO -> {
-                    showNotification(event, NotificationManager.IMPORTANCE_LOW)
+                    showNotification(event, NotificationManager.IMPORTANCE_LOW, vibrate = false)
                     AckWorker.enqueue(context, event.id)
                 }
             }
@@ -57,11 +65,18 @@ class AlertDispatcher(private val context: Context) {
         }
     }
 
-    private fun showNotification(event: AlertEvent, importance: Int) {
+    private fun showNotification(event: AlertEvent, importance: Int, vibrate: Boolean) {
         val manager = context.getSystemService(NotificationManager::class.java)
         val channelId = "alert_${event.level.name.lowercase()}"
         manager.createNotificationChannel(
-            NotificationChannel(channelId, event.level.name.lowercase().replaceFirstChar { it.uppercase() }, importance)
+            NotificationChannel(
+                channelId,
+                event.level.name.lowercase().replaceFirstChar { it.uppercase() },
+                importance
+            ).apply {
+                enableVibration(vibrate)
+                if (vibrate) vibrationPattern = longArrayOf(0, 250, 150, 450)
+            }
         )
         manager.notify(
             event.id.hashCode(),
