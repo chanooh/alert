@@ -200,21 +200,30 @@ private fun AlertHome() {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Reliability permissions", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Button(Modifier.fillMaxWidth(), onClick = {
-                        if (Build.VERSION.SDK_INT >= 33) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        else context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                        })
-                    }) { Text("Notification permission") }
-                    Button(Modifier.fillMaxWidth(), onClick = {
-                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
-                    }) { Text("Do Not Disturb access") }
-                    if (Build.VERSION.SDK_INT >= 34) {
-                        Button(Modifier.fillMaxWidth(), onClick = {
-                            context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
-                                data = Uri.parse("package:${context.packageName}")
+                    Button(
+                        onClick = {
+                            if (Build.VERSION.SDK_INT >= 33) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            else context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                             })
-                        }) { Text("Full-screen alert access") }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Notification permission") }
+                    Button(
+                        onClick = {
+                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Do Not Disturb access") }
+                    if (Build.VERSION.SDK_INT >= 34) {
+                        Button(
+                            onClick = {
+                                context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                })
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Full-screen alert access") }
                     }
                 }
             }
