@@ -34,6 +34,8 @@ class AlertDispatcher(private val context: Context) {
             return
         }
 
+        AlertHistoryStore.record(context, event)
+
         try {
             when (event.level) {
                 AlertLevel.CRITICAL -> {
@@ -53,14 +55,17 @@ class AlertDispatcher(private val context: Context) {
                         volumePercent = settings.criticalVolumePercent
                     )
                     AckWorker.enqueue(context, event.id)
+                    AlertHistoryStore.markAcknowledged(context, listOf(event.id))
                 }
                 AlertLevel.WARNING -> {
                     showNotification(event, NotificationManager.IMPORTANCE_DEFAULT, vibrate = true)
                     AckWorker.enqueue(context, event.id)
+                    AlertHistoryStore.markAcknowledged(context, listOf(event.id))
                 }
                 AlertLevel.INFO -> {
                     showNotification(event, NotificationManager.IMPORTANCE_LOW, vibrate = false)
                     AckWorker.enqueue(context, event.id)
+                    AlertHistoryStore.markAcknowledged(context, listOf(event.id))
                 }
             }
         } catch (error: Throwable) {

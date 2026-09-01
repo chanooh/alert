@@ -31,6 +31,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -40,26 +42,35 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import dev.chanooh.alert.alarm.CriticalAlarmService
+import dev.chanooh.alert.alert.AlertHistoryItem
+import dev.chanooh.alert.alert.AlertHistoryStore
+import dev.chanooh.alert.alert.AlertLevel
 import dev.chanooh.alert.security.SecretStore
 import dev.chanooh.alert.settings.AppSettings
 import dev.chanooh.alert.settings.SettingsRepository
 import dev.chanooh.alert.settings.redacted
 import dev.chanooh.alert.transport.MqttTransportService
 import dev.chanooh.alert.ui.theme.AlertTheme
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AlertHistoryStore.init(applicationContext)
         setContent { AlertTheme { AlertHome() } }
     }
 }
@@ -72,7 +83,9 @@ private fun AlertHome() {
     val repository = remember { SettingsRepository(context.applicationContext) }
     val secretStore = remember { SecretStore(context.applicationContext) }
     val persisted by repository.settings.collectAsState(initial = AppSettings())
+    val history by AlertHistoryStore.history.collectAsState()
     val scope = rememberCoroutineScope()
+    var selectedTab by rememberSaveable { mutableStateOf(0) }
 
     var serverUrl by remember { mutableStateOf("") }
     var mqttBroker by remember { mutableStateOf("") }
@@ -114,23 +127,41 @@ private fun AlertHome() {
 
     Scaffold(topBar = { TopAppBar(title = { Text("告警") }) }) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.fillMaxSize().padding(padding)
         ) {
-            StatusCard(
-                serverConfigured = persisted.serverBaseUrl.isNotBlank(),
-                mqttConfigured = persisted.mqttBroker.isNotBlank() && persisted.deviceId.isNotBlank(),
-                dndAccess = notificationManager.isNotificationPolicyAccessGranted,
-                notificationsAllowed = notificationsAllowed,
-                fullScreenAllowed = fullScreenAllowed
-            )
+            TabRow(selectedTabIndex = selectedTab) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = { Text("通知") }
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = { Text("设置") }
+                )
+            }
 
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (selectedTab == 0) {
+                NotificationTab(history, Modifier.weight(1f))
+            } else {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    StatusCard(
+                        serverConfigured = persisted.serverBaseUrl.isNotBlank(),
+                        mqttConfigured = persisted.mqttBroker.isNotBlank() && persisted.deviceId.isNotBlank(),
+                        dndAccess = notificationManager.isNotificationPolicyAccessGranted,
+                        notificationsAllowed = notificationsAllowed,
+                        fullScreenAllowed = fullScreenAllowed
+                    )
+
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("连接设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
                         "地址只在本机填写。密钥由 Android Keystore 加密保存，永远不会提交到 Git。",
@@ -266,6 +297,84 @@ private fun AlertHome() {
         }
     }
 }
+}
+}
+
+@Composable
+private fun NotificationTab(history: List<AlertHistoryItem>, modifier: Modifier = Modifier) {
+    if (history.isEmpty()) {
+        Column(
+            modifier = modifier.fillMaxWidth().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("暂无通知", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text("收到告警后，详细内容会显示在这里。", style = MaterialTheme.typography.bodyMedium)
+        }
+        return
+    }
+
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("最近通知", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        history.forEach { item ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = levelLabel(item.level),
+                            color = if (item.level == AlertLevel.CRITICAL) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (item.acknowledged) "已确认" else "等待确认",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(text = item.message, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = formatTimestamp(item.createdAt),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun levelLabel(level: AlertLevel): String = when (level) {
+    AlertLevel.INFO -> "Info 通知"
+    AlertLevel.WARNING -> "Warning 告警"
+    AlertLevel.URGENT -> "Urgent 告警"
+    AlertLevel.CRITICAL -> "Critical 告警"
+}
+
+private fun formatTimestamp(timestamp: Long): String =
+    SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
 
 @Composable
 private fun SecretField(label: String, value: String, onValueChange: (String) -> Unit) {

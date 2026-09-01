@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.chanooh.alert.alarm.CriticalAlarmService
 import dev.chanooh.alert.alert.ActiveAlertStore
+import dev.chanooh.alert.alert.AlertHistoryStore
 import dev.chanooh.alert.network.AckWorker
 import dev.chanooh.alert.ui.theme.AlertTheme
 
@@ -49,6 +50,7 @@ class CriticalAlertActivity : ComponentActivity() {
                         eventIds.forEach { eventId ->
                             AckWorker.enqueue(applicationContext, eventId)
                         }
+                        AlertHistoryStore.markAcknowledged(applicationContext, eventIds)
                         CriticalAlarmService.stop(this)
                         finishAndRemoveTask()
                     }
