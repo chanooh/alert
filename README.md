@@ -139,6 +139,10 @@ Production use requires authenticated MQTT over TLS (`mqtts://`), HTTPS, firewal
 or VPN restrictions, rotated secrets, and a separately reviewed deployment
 configuration.
 
+The Debug APK includes a test-only cleartext-network manifest overlay so this
+temporary HTTP endpoint can be exercised on a lab device. Do not carry that
+setting into a production/release build.
+
 ## Automated verification and CI artifacts
 
 `.github/workflows/ci.yml` runs on `main` and `feature/**` pushes and on pull requests. A branch is not considered build-verified until the workflow for that exact head commit is green.
