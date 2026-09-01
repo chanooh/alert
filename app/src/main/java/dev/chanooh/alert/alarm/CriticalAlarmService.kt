@@ -17,6 +17,7 @@ import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import dev.chanooh.alert.system.RootDndController
 import dev.chanooh.alert.ui.CriticalAlertActivity
 
 class CriticalAlarmService : Service() {
@@ -24,6 +25,7 @@ class CriticalAlarmService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var originalAlarmVolume: Int? = null
     private var restoreVolumeAfterAck: Boolean = true
+    private var dndRestoreMode: RootDndController.RestoreMode? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -47,9 +49,15 @@ class CriticalAlarmService : Service() {
         val message = intent?.getStringExtra(EXTRA_MESSAGE).orEmpty().ifBlank { "Immediate attention required" }
         val volumePercent = intent?.getIntExtra(EXTRA_VOLUME_PERCENT, 100) ?: 100
         restoreVolumeAfterAck = intent?.getBooleanExtra(EXTRA_RESTORE_VOLUME, true) ?: true
+        val rootDndOverride = intent?.getBooleanExtra(EXTRA_ROOT_DND_OVERRIDE, false) ?: false
 
         startForeground(NOTIFICATION_ID, buildNotification(title, message))
         acquireWakeLock()
+
+        if (rootDndOverride && dndRestoreMode == null) {
+            dndRestoreMode = RootDndController.overrideTotalSilenceIfNeeded(applicationContext)
+        }
+
         raiseAlarmVolume(volumePercent)
         startVibration()
         startAlarmAudio()
@@ -128,18 +136,21 @@ class CriticalAlarmService : Service() {
         if (mediaPlayer != null) return
         val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
             ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-        mediaPlayer = MediaPlayer().apply {
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            setDataSource(this@CriticalAlarmService, alarmUri)
-            isLooping = true
-            prepare()
-            start()
-        }
+            ?: return
+        mediaPlayer = runCatching {
+            MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                setDataSource(this@CriticalAlarmService, alarmUri)
+                isLooping = true
+                prepare()
+                start()
+            }
+        }.getOrNull()
     }
 
     private fun startVibration() {
@@ -170,6 +181,8 @@ class CriticalAlarmService : Service() {
         restoreAlarmVolumeIfNeeded()
         wakeLock?.takeIf { it.isHeld }?.release()
         wakeLock = null
+        RootDndController.restore(dndRestoreMode)
+        dndRestoreMode = null
     }
 
     override fun onDestroy() {
@@ -186,6 +199,7 @@ class CriticalAlarmService : Service() {
         const val EXTRA_MESSAGE = "message"
         const val EXTRA_VOLUME_PERCENT = "volume_percent"
         const val EXTRA_RESTORE_VOLUME = "restore_volume"
+        const val EXTRA_ROOT_DND_OVERRIDE = "root_dnd_override"
         private const val CHANNEL_ID = "critical_alerts"
         private const val NOTIFICATION_ID = 9001
 
@@ -194,7 +208,8 @@ class CriticalAlarmService : Service() {
             title: String,
             message: String,
             volumePercent: Int = 100,
-            restoreVolume: Boolean = true
+            restoreVolume: Boolean = true,
+            rootDndOverride: Boolean = false
         ) {
             val intent = Intent(context, CriticalAlarmService::class.java).apply {
                 action = ACTION_START
@@ -202,6 +217,7 @@ class CriticalAlarmService : Service() {
                 putExtra(EXTRA_MESSAGE, message)
                 putExtra(EXTRA_VOLUME_PERCENT, volumePercent)
                 putExtra(EXTRA_RESTORE_VOLUME, restoreVolume)
+                putExtra(EXTRA_ROOT_DND_OVERRIDE, rootDndOverride)
             }
             context.startForegroundService(intent)
         }
