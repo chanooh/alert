@@ -55,7 +55,7 @@ class CriticalAlarmService : Service() {
         acquireWakeLock()
 
         if (rootDndOverride && dndRestoreMode == null) {
-            dndRestoreMode = RootDndController.overrideTotalSilenceIfNeeded(applicationContext)
+            dndRestoreMode = RootDndController.overrideIfNeeded(applicationContext)
         }
 
         raiseAlarmVolume(volumePercent)
