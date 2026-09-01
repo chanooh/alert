@@ -5,31 +5,36 @@ import android.content.Context
 import java.util.concurrent.TimeUnit
 
 /**
- * Best-effort KernelSU/root override for Android's TOTAL SILENCE DND mode.
+ * Best-effort KernelSU/root override for active Android DND modes.
  *
- * NotificationChannel bypass cannot defeat INTERRUPTION_FILTER_NONE. For a
- * private rooted device we can temporarily disable manual DND using Android's
- * notification shell command and restore total-silence after the alert ends.
- * Other DND modes are left untouched so normal alarm/priority semantics apply.
+ * Notification-channel bypass is not a hard guarantee for every DND policy.
+ * On this private rooted-device path we temporarily disable an active DND
+ * filter before a CRITICAL alarm and restore the previous filter level when
+ * the alert ends. We intentionally do nothing when DND is already off.
  */
 object RootDndController {
-    enum class RestoreMode { TOTAL_SILENCE }
+    enum class RestoreMode(val shellValue: String) {
+        PRIORITY("priority"),
+        TOTAL_SILENCE("none"),
+        ALARMS_ONLY("alarms")
+    }
 
-    fun overrideTotalSilenceIfNeeded(context: Context): RestoreMode? {
+    fun overrideIfNeeded(context: Context): RestoreMode? {
         val manager = context.getSystemService(NotificationManager::class.java)
-        if (manager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_NONE) {
-            return null
-        }
+        val restoreMode = when (manager.currentInterruptionFilter) {
+            NotificationManager.INTERRUPTION_FILTER_PRIORITY -> RestoreMode.PRIORITY
+            NotificationManager.INTERRUPTION_FILTER_NONE -> RestoreMode.TOTAL_SILENCE
+            NotificationManager.INTERRUPTION_FILTER_ALARMS -> RestoreMode.ALARMS_ONLY
+            else -> null
+        } ?: return null
+
         val disabled = runRootCommand("cmd notification set_dnd off") ||
             runRootCommand("cmd notification set_dnd all")
-        return if (disabled) RestoreMode.TOTAL_SILENCE else null
+        return if (disabled) restoreMode else null
     }
 
     fun restore(mode: RestoreMode?) {
-        when (mode) {
-            RestoreMode.TOTAL_SILENCE -> runRootCommand("cmd notification set_dnd none")
-            null -> Unit
-        }
+        if (mode != null) runRootCommand("cmd notification set_dnd ${mode.shellValue}")
     }
 
     fun hasRoot(): Boolean = runRootCommand("id")
