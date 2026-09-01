@@ -12,6 +12,10 @@ class ActiveAlertStore(context: Context) {
         writeIds(ids)
     }
 
+    fun contains(eventId: String): Boolean = synchronized(LOCK) {
+        eventId in readIds()
+    }
+
     fun remove(eventId: String) = synchronized(LOCK) {
         writeIds(readIds().filterNot { it == eventId })
     }
