@@ -9,6 +9,7 @@ import dev.chanooh.alert.alarm.UrgentAlertService
 import dev.chanooh.alert.network.AckWorker
 import dev.chanooh.alert.security.AlertVerifier
 import dev.chanooh.alert.security.SecretStore
+import dev.chanooh.alert.settings.AppSettings
 import dev.chanooh.alert.settings.SettingsRepository
 import kotlinx.coroutines.flow.first
 
@@ -20,22 +21,25 @@ class AlertDispatcher(private val context: Context) {
         val settings = SettingsRepository(context).settings.first()
         val secret = SecretStore(context).getDeviceHmacSecret()
         if (!AlertVerifier.verify(event, settings.deviceId, secret)) return
-        if (!deduplicator.tryReserve(event.id)) return
+
+        val isFirstDelivery = deduplicator.tryReserve(event.id)
+        if (!isFirstDelivery) {
+            // CRITICAL events remain in ActiveAlertStore until the user ACKs.
+            // If HyperOS/root kills the app while the alarm is active, the
+            // server retry must be able to re-arm the alarm after Guardian
+            // restores MQTT instead of being swallowed by durable dedupe.
+            if (event.level == AlertLevel.CRITICAL && activeStore.contains(event.id)) {
+                ensureCriticalAlarm(event, settings)
+            }
+            return
+        }
 
         try {
             when (event.level) {
                 AlertLevel.CRITICAL -> {
-                    UrgentAlertService.stop(context)
                     activeStore.add(event.id)
                     try {
-                        CriticalAlarmService.start(
-                            context = context,
-                            title = event.title,
-                            message = event.message,
-                            volumePercent = settings.criticalVolumePercent,
-                            restoreVolume = settings.restoreVolumeAfterAck,
-                            rootDndOverride = settings.rootDndOverrideEnabled
-                        )
+                        ensureCriticalAlarm(event, settings)
                     } catch (error: Throwable) {
                         activeStore.remove(event.id)
                         throw error
@@ -63,6 +67,18 @@ class AlertDispatcher(private val context: Context) {
             deduplicator.forget(event.id)
             throw error
         }
+    }
+
+    private fun ensureCriticalAlarm(event: AlertEvent, settings: AppSettings) {
+        UrgentAlertService.stop(context)
+        CriticalAlarmService.start(
+            context = context,
+            title = event.title,
+            message = event.message,
+            volumePercent = settings.criticalVolumePercent,
+            restoreVolume = settings.restoreVolumeAfterAck,
+            rootDndOverride = settings.rootDndOverrideEnabled
+        )
     }
 
     private fun showNotification(event: AlertEvent, importance: Int, vibrate: Boolean) {
