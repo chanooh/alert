@@ -20,6 +20,7 @@ class SettingsRepository(private val context: Context) {
         val deviceId = stringPreferencesKey("device_id")
         val criticalVolumePercent = intPreferencesKey("critical_volume_percent")
         val restoreVolumeAfterAck = booleanPreferencesKey("restore_volume_after_ack")
+        val rootDndOverrideEnabled = booleanPreferencesKey("root_dnd_override_enabled")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
@@ -30,7 +31,8 @@ class SettingsRepository(private val context: Context) {
             mqttEnabled = prefs[Keys.mqttEnabled] ?: false,
             deviceId = prefs[Keys.deviceId].orEmpty(),
             criticalVolumePercent = prefs[Keys.criticalVolumePercent] ?: 100,
-            restoreVolumeAfterAck = prefs[Keys.restoreVolumeAfterAck] ?: true
+            restoreVolumeAfterAck = prefs[Keys.restoreVolumeAfterAck] ?: true,
+            rootDndOverrideEnabled = prefs[Keys.rootDndOverrideEnabled] ?: false
         )
     }
 
@@ -43,6 +45,7 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.deviceId] = settings.deviceId.trim()
             prefs[Keys.criticalVolumePercent] = settings.criticalVolumePercent.coerceIn(10, 100)
             prefs[Keys.restoreVolumeAfterAck] = settings.restoreVolumeAfterAck
+            prefs[Keys.rootDndOverrideEnabled] = settings.rootDndOverrideEnabled
         }
     }
 }
