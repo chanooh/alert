@@ -41,6 +41,11 @@
             android:foregroundServiceType="mediaPlayback" />
 
         <service
+            android:name=".alarm.UrgentAlertService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <service
             android:name=".transport.MqttTransportService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
