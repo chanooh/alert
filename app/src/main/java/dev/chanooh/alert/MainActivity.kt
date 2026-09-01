@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AlertHome() {
     val context = LocalContext.current
+    val notificationManager = context.getSystemService(NotificationManager::class.java)
     val repository = remember { SettingsRepository(context.applicationContext) }
     val secretStore = remember { SecretStore(context.applicationContext) }
     val persisted by repository.settings.collectAsState(initial = AppSettings())
@@ -107,6 +108,10 @@ private fun AlertHome() {
         ActivityResultContracts.RequestPermission()
     ) { }
 
+    val notificationsAllowed = Build.VERSION.SDK_INT < 33 ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    val fullScreenAllowed = Build.VERSION.SDK_INT < 34 || notificationManager.canUseFullScreenIntent()
+
     Scaffold(topBar = { TopAppBar(title = { Text("Alert") }) }) { padding ->
         Column(
             modifier = Modifier
@@ -119,10 +124,9 @@ private fun AlertHome() {
             StatusCard(
                 serverConfigured = persisted.serverBaseUrl.isNotBlank(),
                 mqttConfigured = persisted.mqttBroker.isNotBlank() && persisted.deviceId.isNotBlank(),
-                dndAccess = context.getSystemService(NotificationManager::class.java)
-                    .isNotificationPolicyAccessGranted,
-                notificationsAllowed = Build.VERSION.SDK_INT < 33 ||
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+                dndAccess = notificationManager.isNotificationPolicyAccessGranted,
+                notificationsAllowed = notificationsAllowed,
+                fullScreenAllowed = fullScreenAllowed
             )
 
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -179,9 +183,9 @@ private fun AlertHome() {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Root override for Total Silence")
+                            Text("Root override for Do Not Disturb")
                             Text(
-                                "Optional KernelSU path. If Android is in total-silence DND, critical alerts temporarily disable it and restore it after ACK.",
+                                "Optional KernelSU path. While critical is active, any DND filter is temporarily disabled and its filter level is restored after ACK. Grant Alert root access in KernelSU first.",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -280,9 +284,10 @@ private fun StatusCard(
     serverConfigured: Boolean,
     mqttConfigured: Boolean,
     dndAccess: Boolean,
-    notificationsAllowed: Boolean
+    notificationsAllowed: Boolean,
+    fullScreenAllowed: Boolean
 ) {
-    val armed = serverConfigured && mqttConfigured && dndAccess && notificationsAllowed
+    val armed = serverConfigured && mqttConfigured && dndAccess && notificationsAllowed && fullScreenAllowed
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("System status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -290,6 +295,7 @@ private fun StatusCard(
             StatusLine("MQTT", mqttConfigured)
             StatusLine("Notifications", notificationsAllowed)
             StatusLine("DND policy access", dndAccess)
+            StatusLine("Full-screen alerts", fullScreenAllowed)
             Text(
                 if (armed) "ARMED" else "SETUP REQUIRED",
                 color = if (armed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
