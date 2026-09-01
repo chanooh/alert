@@ -54,10 +54,9 @@ class MqttTransportService : Service() {
         runCatching { connect() }
             .onFailure {
                 GuardianMarker.setEnabled(applicationContext, false)
-                updateNotification("Configuration error · open Alert to fix")
                 runCatching { client?.disconnect() }
                 client = null
-                stopForeground(STOP_FOREGROUND_DETACH)
+                stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
     }
