@@ -104,7 +104,7 @@ private fun AlertHome() {
     var loaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(persisted) {
-        if (!loaded) {
+        if (!loaded || persisted != AppSettings()) {
             serverUrl = persisted.serverBaseUrl
             mqttBroker = persisted.mqttBroker
             mqttUsername = persisted.mqttUsername
