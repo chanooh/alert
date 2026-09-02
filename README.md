@@ -155,8 +155,17 @@ The CI jobs verify:
 
 Successful runs upload two review artifacts:
 
-- `alert-debug-apk` — debug APK produced by `assembleDebug`.
+- `alert-release-apk` — Release APK signed with the repository's private CI keystore.
 - `alert-guardian-kernelsu` — installable KernelSU Guardian ZIP.
+
+### Release signing
+
+The Android build reads `ANDROID_KEYSTORE_FILE`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` from the CI environment. The
+keystore itself is supplied through the encrypted `ANDROID_KEYSTORE_BASE64`
+repository secret and is never committed to Git. Keep a secure backup of the
+keystore and its passwords: Android will reject future updates if the signing
+key is lost or replaced.
 
 The exact run URL, head SHA, artifact digests, and success state should be taken from the latest GitHub Actions run for the branch/PR rather than copied from an older run.
 
