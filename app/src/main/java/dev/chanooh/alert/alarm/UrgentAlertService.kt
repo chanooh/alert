@@ -48,11 +48,14 @@ class UrgentAlertService : Service() {
         val message = intent?.getStringExtra(EXTRA_MESSAGE).orEmpty().ifBlank { "需要关注" }
         val volumePercent = intent?.getIntExtra(EXTRA_VOLUME_PERCENT, DEFAULT_VOLUME_PERCENT)
             ?: DEFAULT_VOLUME_PERCENT
+        val silentMode = intent?.getBooleanExtra(EXTRA_SILENT_MODE, false) ?: false
 
         startForeground(NOTIFICATION_ID, buildNotification(title, message))
-        raiseAlarmVolume(volumePercent)
-        startVibration()
-        startAlarmAudio()
+        if (!silentMode) {
+            raiseAlarmVolume(volumePercent)
+            startVibration()
+            startAlarmAudio()
+        }
         handler.removeCallbacksAndMessages(null)
         handler.postDelayed({ stopAlert() }, DURATION_MS)
     }
@@ -168,6 +171,7 @@ class UrgentAlertService : Service() {
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_MESSAGE = "message"
         private const val EXTRA_VOLUME_PERCENT = "volume_percent"
+        private const val EXTRA_SILENT_MODE = "silent_mode"
         private const val CHANNEL_ID = "urgent_alerts"
         private const val NOTIFICATION_ID = 9002
         private const val DEFAULT_VOLUME_PERCENT = 80
@@ -177,13 +181,15 @@ class UrgentAlertService : Service() {
             context: Context,
             title: String,
             message: String,
-            volumePercent: Int
+            volumePercent: Int,
+            silentMode: Boolean = false
         ) {
             context.startForegroundService(Intent(context, UrgentAlertService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_MESSAGE, message)
                 putExtra(EXTRA_VOLUME_PERCENT, volumePercent)
+                putExtra(EXTRA_SILENT_MODE, silentMode)
             })
         }
 

@@ -42,6 +42,7 @@ class CriticalAlertActivity : ComponentActivity() {
                 CriticalAlertScreen(
                     title = title,
                     message = message,
+                    onSilence = { CriticalAlarmService.stop(this) },
                     onAcknowledge = {
                         val eventIds = ActiveAlertStore(applicationContext).drain()
                         // Persist ACK work before stopping the alarm service. If the
@@ -64,6 +65,7 @@ class CriticalAlertActivity : ComponentActivity() {
 private fun CriticalAlertScreen(
     title: String,
     message: String,
+    onSilence: () -> Unit,
     onAcknowledge: () -> Unit
 ) {
     Surface(modifier = Modifier.fillMaxSize()) {
@@ -91,6 +93,10 @@ private fun CriticalAlertScreen(
             Spacer(Modifier.height(40.dp))
             Button(modifier = Modifier.fillMaxWidth(), onClick = onAcknowledge) {
                 Text("确认并停止")
+            }
+            Spacer(Modifier.height(12.dp))
+            Button(modifier = Modifier.fillMaxWidth(), onClick = onSilence) {
+                Text("只停止响铃（保留待确认）")
             }
         }
     }

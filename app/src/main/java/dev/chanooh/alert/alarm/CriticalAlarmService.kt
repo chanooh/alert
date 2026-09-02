@@ -50,17 +50,20 @@ class CriticalAlarmService : Service() {
         val volumePercent = intent?.getIntExtra(EXTRA_VOLUME_PERCENT, 100) ?: 100
         restoreVolumeAfterAck = intent?.getBooleanExtra(EXTRA_RESTORE_VOLUME, true) ?: true
         val rootDndOverride = intent?.getBooleanExtra(EXTRA_ROOT_DND_OVERRIDE, false) ?: false
+        val silentMode = intent?.getBooleanExtra(EXTRA_SILENT_MODE, false) ?: false
 
         startForeground(NOTIFICATION_ID, buildNotification(title, message))
         acquireWakeLock()
 
-        if (rootDndOverride && dndRestoreMode == null) {
+        if (rootDndOverride && !silentMode && dndRestoreMode == null) {
             dndRestoreMode = RootDndController.overrideIfNeeded(applicationContext)
         }
 
-        raiseAlarmVolume(volumePercent)
-        startVibration()
-        startAlarmAudio()
+        if (!silentMode) {
+            raiseAlarmVolume(volumePercent)
+            startVibration()
+            startAlarmAudio()
+        }
     }
 
     private fun buildNotification(title: String, message: String): Notification {
@@ -200,6 +203,7 @@ class CriticalAlarmService : Service() {
         const val EXTRA_VOLUME_PERCENT = "volume_percent"
         const val EXTRA_RESTORE_VOLUME = "restore_volume"
         const val EXTRA_ROOT_DND_OVERRIDE = "root_dnd_override"
+        const val EXTRA_SILENT_MODE = "silent_mode"
         private const val CHANNEL_ID = "critical_alerts"
         private const val NOTIFICATION_ID = 9001
 
@@ -209,7 +213,8 @@ class CriticalAlarmService : Service() {
             message: String,
             volumePercent: Int = 100,
             restoreVolume: Boolean = true,
-            rootDndOverride: Boolean = false
+            rootDndOverride: Boolean = false,
+            silentMode: Boolean = false
         ) {
             val intent = Intent(context, CriticalAlarmService::class.java).apply {
                 action = ACTION_START
@@ -218,6 +223,7 @@ class CriticalAlarmService : Service() {
                 putExtra(EXTRA_VOLUME_PERCENT, volumePercent)
                 putExtra(EXTRA_RESTORE_VOLUME, restoreVolume)
                 putExtra(EXTRA_ROOT_DND_OVERRIDE, rootDndOverride)
+                putExtra(EXTRA_SILENT_MODE, silentMode)
             }
             context.startForegroundService(intent)
         }

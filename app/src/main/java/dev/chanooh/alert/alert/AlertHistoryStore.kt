@@ -70,6 +70,14 @@ object AlertHistoryStore {
         }
     }
 
+    fun delete(context: Context, eventId: String) {
+        init(context)
+        if (eventId.isBlank()) return
+        synchronized(lock) {
+            write(read(preferences!!).filterNot { it.id == eventId })
+        }
+    }
+
     private fun read(prefs: android.content.SharedPreferences): List<AlertHistoryItem> {
         val raw = prefs.getString(KEY_ITEMS, null) ?: return emptyList()
         return runCatching {

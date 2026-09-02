@@ -41,6 +41,11 @@ Alert dispatcher
 
 ACK uploads use WorkManager, so a temporary loss of network does not require the user to keep the alert screen open. The server keeps pending state and retries unacknowledged events. Active critical IDs are persisted so a server retry can re-arm an unacknowledged critical alert after the Android process has died and the transport is restored.
 
+The notification tab keeps the latest 100 events locally. Long messages can be
+expanded or collapsed, individual entries can be deleted from the local inbox,
+and **停止当前响铃** stops any active Urgent/Critical audio and vibration without
+acknowledging a Critical event.
+
 ## Alert levels
 
 | Level | Local behavior | ACK behavior |
@@ -65,6 +70,8 @@ Installation-specific values are entered in the Material 3 control center on the
 - Critical alarm volume
 - Restore-alarm-volume-after-ACK preference
 - Optional Root DND override
+- Persistent silent mode (notifications remain visible, but Urgent/Critical audio,
+  vibration, and alarm-volume changes are suppressed until it is turned off)
 
 Sensitive values such as the device API token, HMAC secret, and MQTT password are encrypted with an Android Keystore-backed AES-GCM key. UI fields containing identifiers/secrets are masked/redacted rather than rendered as plain persisted values.
 

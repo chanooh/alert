@@ -8,7 +8,8 @@ data class AppSettings(
     val deviceId: String = "",
     val criticalVolumePercent: Int = 100,
     val restoreVolumeAfterAck: Boolean = true,
-    val rootDndOverrideEnabled: Boolean = false
+    val rootDndOverrideEnabled: Boolean = false,
+    val silentModeEnabled: Boolean = false
 )
 
 fun String.redacted(): String {

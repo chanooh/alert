@@ -52,7 +52,8 @@ class AlertDispatcher(private val context: Context) {
                         context = context,
                         title = event.title,
                         message = event.message,
-                        volumePercent = settings.criticalVolumePercent
+                        volumePercent = settings.criticalVolumePercent,
+                        silentMode = settings.silentModeEnabled
                     )
                     AckWorker.enqueue(context, event.id)
                     AlertHistoryStore.markAcknowledged(context, listOf(event.id))
@@ -82,7 +83,8 @@ class AlertDispatcher(private val context: Context) {
             message = event.message,
             volumePercent = settings.criticalVolumePercent,
             restoreVolume = settings.restoreVolumeAfterAck,
-            rootDndOverride = settings.rootDndOverrideEnabled
+            rootDndOverride = settings.rootDndOverrideEnabled,
+            silentMode = settings.silentModeEnabled
         )
     }
 

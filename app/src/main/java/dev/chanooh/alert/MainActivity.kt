@@ -34,6 +34,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import dev.chanooh.alert.alarm.CriticalAlarmService
+import dev.chanooh.alert.alarm.UrgentAlertService
 import dev.chanooh.alert.alert.AlertHistoryItem
 import dev.chanooh.alert.alert.AlertHistoryStore
 import dev.chanooh.alert.alert.AlertLevel
@@ -98,6 +100,7 @@ private fun AlertHome() {
     var volume by remember { mutableStateOf(100f) }
     var restoreVolume by remember { mutableStateOf(true) }
     var rootDndOverride by remember { mutableStateOf(false) }
+    var silentMode by remember { mutableStateOf(false) }
     var loaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(persisted) {
@@ -113,6 +116,7 @@ private fun AlertHome() {
             volume = persisted.criticalVolumePercent.toFloat()
             restoreVolume = persisted.restoreVolumeAfterAck
             rootDndOverride = persisted.rootDndOverrideEnabled
+            silentMode = persisted.silentModeEnabled
             loaded = true
         }
     }
@@ -143,7 +147,15 @@ private fun AlertHome() {
             }
 
             if (selectedTab == 0) {
-                NotificationTab(history, Modifier.weight(1f))
+                NotificationTab(
+                    history = history,
+                    modifier = Modifier.weight(1f),
+                    onDelete = { eventId -> AlertHistoryStore.delete(context, eventId) },
+                    onStopRinging = {
+                        CriticalAlarmService.stop(context)
+                        UrgentAlertService.stop(context)
+                    }
+                )
             } else {
                 Column(
                     modifier = Modifier
@@ -223,6 +235,21 @@ private fun AlertHome() {
                         Switch(checked = rootDndOverride, onCheckedChange = { rootDndOverride = it })
                     }
 
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("静音模式")
+                            Text(
+                                "开启期间仍显示通知，但不播放 Urgent/Critical 响铃、震动或调高音量。持续到手动关闭。",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Switch(checked = silentMode, onCheckedChange = { silentMode = it })
+                    }
+
                     Button(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
@@ -239,7 +266,8 @@ private fun AlertHome() {
                                         deviceId = deviceId,
                                         criticalVolumePercent = volume.toInt(),
                                         restoreVolumeAfterAck = restoreVolume,
-                                        rootDndOverrideEnabled = rootDndOverride
+                                        rootDndOverrideEnabled = rootDndOverride,
+                                        silentModeEnabled = silentMode
                                     )
                                 )
                                 if (mqttEnabled) MqttTransportService.start(context) else MqttTransportService.stop(context)
@@ -289,7 +317,8 @@ private fun AlertHome() {
                         message = "锁定屏幕、开启免打扰并静音普通通知，以验证告警路径。",
                         volumePercent = persisted.criticalVolumePercent,
                         restoreVolume = persisted.restoreVolumeAfterAck,
-                        rootDndOverride = persisted.rootDndOverrideEnabled
+                        rootDndOverride = persisted.rootDndOverrideEnabled,
+                        silentMode = persisted.silentModeEnabled
                     )
                 }
             ) { Text("测试 Critical 告警") }
@@ -301,7 +330,12 @@ private fun AlertHome() {
 }
 
 @Composable
-private fun NotificationTab(history: List<AlertHistoryItem>, modifier: Modifier = Modifier) {
+private fun NotificationTab(
+    history: List<AlertHistoryItem>,
+    onDelete: (String) -> Unit,
+    onStopRinging: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     if (history.isEmpty()) {
         Column(
             modifier = modifier.fillMaxWidth().padding(24.dp),
@@ -311,6 +345,8 @@ private fun NotificationTab(history: List<AlertHistoryItem>, modifier: Modifier 
             Text("暂无通知", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text("收到告警后，详细内容会显示在这里。", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onStopRinging) { Text("停止当前响铃") }
         }
         return
     }
@@ -321,8 +357,16 @@ private fun NotificationTab(history: List<AlertHistoryItem>, modifier: Modifier 
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("最近通知", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("最近通知", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Button(onClick = onStopRinging) { Text("停止当前响铃") }
+        }
         history.forEach { item ->
+            var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     Modifier.padding(16.dp),
@@ -354,12 +398,28 @@ private fun NotificationTab(history: List<AlertHistoryItem>, modifier: Modifier 
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(text = item.message, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = item.message,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = if (expanded) Int.MAX_VALUE else 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (item.message.length > 140) {
+                        TextButton(onClick = { expanded = !expanded }) {
+                            Text(if (expanded) "收起" else "展开全文")
+                        }
+                    }
                     Text(
                         text = formatTimestamp(item.createdAt),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { onDelete(item.id) }) { Text("删除") }
+                    }
                 }
             }
         }
