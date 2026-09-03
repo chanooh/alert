@@ -201,3 +201,12 @@ This repository is intended to remain safe to publish:
 ## Development / review
 
 PR #1 established the initial app and has already been merged. The current follow-up history remains on `feature/initial-alert-app` and is proposed to `main` through PR #2. Do not merge PR #2 solely because CI is green: HyperOS 3 + KernelSU runtime behavior still requires the real-device acceptance checklist above.
+
+## AI integration skill
+
+[`skills/alert-notifier/SKILL.md`](skills/alert-notifier/SKILL.md) is a reusable
+instruction file for another AI or coding agent. Give it to the agent when it
+needs to add event monitoring to a codebase and notify this Alert app. It uses
+runtime variables such as `ALERT_BASE_URL` and `ALERT_ADMIN_API_KEY`, keeps
+credentials out of source control, defines severity mapping, and requires
+caller-side de-duplication before calling `POST /api/alerts`.
