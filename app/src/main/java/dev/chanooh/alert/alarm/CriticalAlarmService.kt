@@ -17,12 +17,15 @@ import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import dev.chanooh.alert.system.RootDndController
 import dev.chanooh.alert.ui.CriticalAlertActivity
 
 class CriticalAlarmService : Service() {
     private var mediaPlayer: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var originalAlarmVolume: Int? = null
+    private var restoreVolumeAfterAck: Boolean = true
+    private var dndRestoreMode: RootDndController.RestoreMode? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -31,22 +34,36 @@ class CriticalAlarmService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOP -> stopAlert()
+            ACTION_STOP -> {
+                cleanup()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
             else -> startAlert(intent)
         }
         return START_NOT_STICKY
     }
 
     private fun startAlert(intent: Intent?) {
-        val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "Critical alert" }
-        val message = intent?.getStringExtra(EXTRA_MESSAGE).orEmpty().ifBlank { "Immediate attention required" }
+        val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "Critical 告警" }
+        val message = intent?.getStringExtra(EXTRA_MESSAGE).orEmpty().ifBlank { "需要立即处理" }
         val volumePercent = intent?.getIntExtra(EXTRA_VOLUME_PERCENT, 100) ?: 100
+        restoreVolumeAfterAck = intent?.getBooleanExtra(EXTRA_RESTORE_VOLUME, true) ?: true
+        val rootDndOverride = intent?.getBooleanExtra(EXTRA_ROOT_DND_OVERRIDE, false) ?: false
+        val silentMode = intent?.getBooleanExtra(EXTRA_SILENT_MODE, false) ?: false
 
         startForeground(NOTIFICATION_ID, buildNotification(title, message))
         acquireWakeLock()
-        raiseAlarmVolume(volumePercent)
-        startVibration()
-        startAlarmAudio()
+
+        if (rootDndOverride && !silentMode && dndRestoreMode == null) {
+            dndRestoreMode = RootDndController.overrideIfNeeded(applicationContext)
+        }
+
+        if (!silentMode) {
+            raiseAlarmVolume(volumePercent)
+            startVibration()
+            startAlarmAudio()
+        }
     }
 
     private fun buildNotification(title: String, message: String): Notification {
@@ -78,10 +95,10 @@ class CriticalAlarmService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Critical alerts",
+            "Critical 告警",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Full-screen alarm-style alerts requiring acknowledgement"
+            description = "需要确认的全屏闹钟式告警"
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             setSound(null, null)
             enableVibration(false)
@@ -102,15 +119,19 @@ class CriticalAlarmService : Service() {
     private fun raiseAlarmVolume(percent: Int) {
         val audioManager = getSystemService(AudioManager::class.java)
         val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-        originalAlarmVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+        if (originalAlarmVolume == null) {
+            originalAlarmVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+        }
         val target = (max * percent.coerceIn(10, 100) / 100f).toInt().coerceAtLeast(1)
         audioManager.setStreamVolume(AudioManager.STREAM_ALARM, target, 0)
     }
 
-    private fun restoreAlarmVolume() {
+    private fun restoreAlarmVolumeIfNeeded() {
         val original = originalAlarmVolume ?: return
-        getSystemService(AudioManager::class.java)
-            .setStreamVolume(AudioManager.STREAM_ALARM, original, 0)
+        if (restoreVolumeAfterAck) {
+            getSystemService(AudioManager::class.java)
+                .setStreamVolume(AudioManager.STREAM_ALARM, original, 0)
+        }
         originalAlarmVolume = null
     }
 
@@ -118,18 +139,21 @@ class CriticalAlarmService : Service() {
         if (mediaPlayer != null) return
         val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
             ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-        mediaPlayer = MediaPlayer().apply {
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            setDataSource(this@CriticalAlarmService, alarmUri)
-            isLooping = true
-            prepare()
-            start()
-        }
+            ?: return
+        mediaPlayer = runCatching {
+            MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                setDataSource(this@CriticalAlarmService, alarmUri)
+                isLooping = true
+                prepare()
+                start()
+            }
+        }.getOrNull()
     }
 
     private fun startVibration() {
@@ -152,20 +176,20 @@ class CriticalAlarmService : Service() {
         }
     }
 
-    private fun stopAlert() {
+    private fun cleanup() {
         mediaPlayer?.runCatching { stop() }
         mediaPlayer?.release()
         mediaPlayer = null
         stopVibration()
-        restoreAlarmVolume()
+        restoreAlarmVolumeIfNeeded()
         wakeLock?.takeIf { it.isHeld }?.release()
         wakeLock = null
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        RootDndController.restore(dndRestoreMode)
+        dndRestoreMode = null
     }
 
     override fun onDestroy() {
-        stopAlert()
+        cleanup()
         super.onDestroy()
     }
 
@@ -177,15 +201,29 @@ class CriticalAlarmService : Service() {
         const val EXTRA_TITLE = "title"
         const val EXTRA_MESSAGE = "message"
         const val EXTRA_VOLUME_PERCENT = "volume_percent"
+        const val EXTRA_RESTORE_VOLUME = "restore_volume"
+        const val EXTRA_ROOT_DND_OVERRIDE = "root_dnd_override"
+        const val EXTRA_SILENT_MODE = "silent_mode"
         private const val CHANNEL_ID = "critical_alerts"
         private const val NOTIFICATION_ID = 9001
 
-        fun start(context: Context, title: String, message: String, volumePercent: Int = 100) {
+        fun start(
+            context: Context,
+            title: String,
+            message: String,
+            volumePercent: Int = 100,
+            restoreVolume: Boolean = true,
+            rootDndOverride: Boolean = false,
+            silentMode: Boolean = false
+        ) {
             val intent = Intent(context, CriticalAlarmService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_MESSAGE, message)
                 putExtra(EXTRA_VOLUME_PERCENT, volumePercent)
+                putExtra(EXTRA_RESTORE_VOLUME, restoreVolume)
+                putExtra(EXTRA_ROOT_DND_OVERRIDE, rootDndOverride)
+                putExtra(EXTRA_SILENT_MODE, silentMode)
             }
             context.startForegroundService(intent)
         }

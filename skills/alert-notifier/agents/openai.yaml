@@ -1,0 +1,4 @@
+interface:
+  display_name: "Alert Notifier"
+  short_description: "Integrate event monitoring with the Alert server"
+  default_prompt: "Use $alert-notifier to add event monitoring and send actionable alerts through the Alert API."

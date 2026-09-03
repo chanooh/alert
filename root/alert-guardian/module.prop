@@ -1,0 +1,7 @@
+id=alert_guardian
+name=Alert Guardian
+version=0.1.0
+versionCode=1
+author=chanooh
+summary=Low-frequency KernelSU reliability guardian for Alert
+description=Restarts the explicitly enabled Alert MQTT transport after process death or force-stop without aggressive polling.

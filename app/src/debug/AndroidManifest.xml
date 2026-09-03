@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Temporary lab-only transport for the development HTTP server. -->
+    <application android:usesCleartextTraffic="true" />
+
+</manifest>

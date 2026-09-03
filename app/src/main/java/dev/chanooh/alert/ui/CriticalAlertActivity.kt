@@ -21,6 +21,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.chanooh.alert.alarm.CriticalAlarmService
+import dev.chanooh.alert.alert.ActiveAlertStore
+import dev.chanooh.alert.alert.AlertHistoryStore
+import dev.chanooh.alert.network.AckWorker
 import dev.chanooh.alert.ui.theme.AlertTheme
 
 class CriticalAlertActivity : ComponentActivity() {
@@ -30,16 +33,25 @@ class CriticalAlertActivity : ComponentActivity() {
         setTurnScreenOn(true)
 
         val title = intent.getStringExtra(CriticalAlarmService.EXTRA_TITLE).orEmpty()
-            .ifBlank { "Critical alert" }
+            .ifBlank { "Critical 告警" }
         val message = intent.getStringExtra(CriticalAlarmService.EXTRA_MESSAGE).orEmpty()
-            .ifBlank { "Immediate attention required" }
+            .ifBlank { "需要立即处理" }
 
         setContent {
             AlertTheme {
                 CriticalAlertScreen(
                     title = title,
                     message = message,
+                    onSilence = { CriticalAlarmService.stop(this) },
                     onAcknowledge = {
+                        val eventIds = ActiveAlertStore(applicationContext).drain()
+                        // Persist ACK work before stopping the alarm service. If the
+                        // process is killed immediately after the tap, WorkManager
+                        // has the best chance to retain the user's acknowledgement.
+                        eventIds.forEach { eventId ->
+                            AckWorker.enqueue(applicationContext, eventId)
+                        }
+                        AlertHistoryStore.markAcknowledged(applicationContext, eventIds)
                         CriticalAlarmService.stop(this)
                         finishAndRemoveTask()
                     }
@@ -53,6 +65,7 @@ class CriticalAlertActivity : ComponentActivity() {
 private fun CriticalAlertScreen(
     title: String,
     message: String,
+    onSilence: () -> Unit,
     onAcknowledge: () -> Unit
 ) {
     Surface(modifier = Modifier.fillMaxSize()) {
@@ -64,7 +77,7 @@ private fun CriticalAlertScreen(
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "CRITICAL",
+                text = "严重告警",
                 color = MaterialTheme.colorScheme.error,
                 fontWeight = FontWeight.Black,
                 fontSize = 36.sp
@@ -76,16 +89,14 @@ private fun CriticalAlertScreen(
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(12.dp))
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyLarge
-            )
+            Text(text = message, style = MaterialTheme.typography.bodyLarge)
             Spacer(Modifier.height(40.dp))
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onAcknowledge
-            ) {
-                Text("Acknowledge & stop")
+            Button(modifier = Modifier.fillMaxWidth(), onClick = onAcknowledge) {
+                Text("确认并停止")
+            }
+            Spacer(Modifier.height(12.dp))
+            Button(modifier = Modifier.fillMaxWidth(), onClick = onSilence) {
+                Text("只停止响铃（保留待确认）")
             }
         }
     }
