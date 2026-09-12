@@ -139,16 +139,14 @@ secret as the server `.env`. Stop the stack as soon as testing is complete:
 docker compose -f docker-compose.dev.yml down
 ```
 
-This stack intentionally uses anonymous, plaintext MQTT and HTTP. It is suitable
-only for a brief, access-controlled lab test; do not expose it to an untrusted
-network or use real credentials, personal events, or a daily-use deployment.
-Production use requires authenticated MQTT over TLS (`mqtts://`), HTTPS, firewall
-or VPN restrictions, rotated secrets, and a separately reviewed deployment
-configuration.
-
-The Debug APK includes a test-only cleartext-network manifest overlay so this
-temporary HTTP endpoint can be exercised on a lab device. Do not carry that
-setting into a production/release build.
+This stack intentionally uses anonymous, plaintext MQTT and HTTP. The current
+personal Release APK also permits cleartext HTTP so that automatic ACK uploads
+work with this simple deployment. It is appropriate only for a user-owned,
+access-controlled host and non-sensitive personal events: anyone able to observe
+the network path can read alert text and the device ACK bearer token. Do not use
+it on an untrusted network or for sensitive data. A hardened deployment requires
+authenticated MQTT over TLS (`mqtts://`), HTTPS, firewall or VPN restrictions,
+and rotated secrets.
 
 ## Automated verification and CI artifacts
 
