@@ -165,6 +165,12 @@ class MqttTransportService : Service() {
             }
             .addDisconnectedListener {
                 updateNotification("MQTT reconnecting")
+                if (connectJob?.isActive != true) {
+                    connectJob = scope.launch {
+                        delay(RECONNECT_DELAY_MS)
+                        connectSafely()
+                    }
+                }
             }
 
         if (secure) builder.sslWithDefaultConfig()
@@ -184,13 +190,7 @@ class MqttTransportService : Service() {
         }
 
         GuardianMarker.setEnabled(applicationContext, true)
-        runCatching {
-            connectBuilder.send().get(15, TimeUnit.SECONDS)
-        }.onFailure {
-            // Network/broker availability failures are transient: keep the marker
-            // enabled so HiveMQ auto-reconnect and KernelSU Guardian can recover.
-            updateNotification("MQTT 正在重连")
-        }
+        connectBuilder.send().get(15, TimeUnit.SECONDS)
     }
 
     private fun stopTransport() {
