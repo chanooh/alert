@@ -10,6 +10,13 @@ export type SignedAlert = {
   signature: string;
 };
 
+export type SignedAcknowledgement = {
+  id: string;
+  deviceId: string;
+  acknowledgedAt: number;
+  signature: string;
+};
+
 export function canonicalAlert(alert: Omit<SignedAlert, "signature">): string {
   return [
     alert.id,
@@ -29,6 +36,34 @@ export function signAlert(
     .update(canonicalAlert(alert), "utf8")
     .digest("hex");
   return { ...alert, signature };
+}
+
+export function canonicalAcknowledgement(
+  acknowledgement: Omit<SignedAcknowledgement, "signature">,
+): string {
+  return [
+    acknowledgement.id,
+    acknowledgement.deviceId,
+    String(acknowledgement.acknowledgedAt),
+  ].join("\n");
+}
+
+export function verifyAcknowledgement(
+  acknowledgement: SignedAcknowledgement,
+  secret: string,
+): boolean {
+  if (
+    !acknowledgement.id ||
+    !acknowledgement.deviceId ||
+    !Number.isFinite(acknowledgement.acknowledgedAt) ||
+    !/^[a-f0-9]{64}$/i.test(acknowledgement.signature)
+  ) {
+    return false;
+  }
+  const expected = createHmac("sha256", secret)
+    .update(canonicalAcknowledgement(acknowledgement), "utf8")
+    .digest("hex");
+  return secureEqual(acknowledgement.signature.toLowerCase(), expected);
 }
 
 export function secureEqual(actual: string | undefined, expected: string): boolean {

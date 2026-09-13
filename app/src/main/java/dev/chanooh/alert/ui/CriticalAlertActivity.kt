@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.sp
 import dev.chanooh.alert.alarm.CriticalAlarmService
 import dev.chanooh.alert.alert.ActiveAlertStore
 import dev.chanooh.alert.alert.AlertHistoryStore
-import dev.chanooh.alert.network.AckWorker
+import dev.chanooh.alert.transport.MqttTransportService
 import dev.chanooh.alert.ui.theme.AlertTheme
 
 class CriticalAlertActivity : ComponentActivity() {
@@ -45,11 +45,8 @@ class CriticalAlertActivity : ComponentActivity() {
                     onSilence = { CriticalAlarmService.stop(this) },
                     onAcknowledge = {
                         val eventIds = ActiveAlertStore(applicationContext).drain()
-                        // Persist ACK work before stopping the alarm service. If the
-                        // process is killed immediately after the tap, WorkManager
-                        // has the best chance to retain the user's acknowledgement.
                         eventIds.forEach { eventId ->
-                            AckWorker.enqueue(applicationContext, eventId)
+                            MqttTransportService.acknowledge(applicationContext, eventId)
                         }
                         AlertHistoryStore.markAcknowledged(applicationContext, eventIds)
                         CriticalAlarmService.stop(this)

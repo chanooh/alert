@@ -12,6 +12,7 @@ import com.hivemq.client.mqtt.datatypes.MqttQos
 import com.hivemq.client.mqtt.mqtt5.Mqtt5AsyncClient
 import dev.chanooh.alert.alert.AlertDispatcher
 import dev.chanooh.alert.alert.AlertEvent
+import dev.chanooh.alert.network.AckWorker
 import dev.chanooh.alert.security.SecretStore
 import dev.chanooh.alert.settings.SettingsRepository
 import dev.chanooh.alert.system.GuardianMarker
@@ -22,6 +23,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -41,6 +44,12 @@ class MqttTransportService : Service() {
                 GuardianMarker.setEnabled(applicationContext, false)
                 stopTransport()
             }
+            ACTION_ACK -> {
+                startForeground(NOTIFICATION_ID, buildNotification("正在确认告警…"))
+                intent.getStringExtra(EXTRA_EVENT_ID)?.let { eventId ->
+                    scope.launch { publishAcknowledgement(eventId) }
+                }
+            }
             else -> {
                 startForeground(NOTIFICATION_ID, buildNotification("Connecting…"))
                 connectJob?.cancel()
@@ -51,14 +60,64 @@ class MqttTransportService : Service() {
     }
 
     private suspend fun connectSafely() {
-        runCatching { connect() }
-            .onFailure {
-                GuardianMarker.setEnabled(applicationContext, false)
-                runCatching { client?.disconnect() }
-                client = null
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+        while (currentCoroutineContext().isActive) {
+            val connected = runCatching { connect() }
+            if (connected.isSuccess) return
+            // Keep the foreground service and Guardian marker active. A bad mobile
+            // network transition must not turn into a permanently dead transport.
+            GuardianMarker.setEnabled(applicationContext, true)
+            updateNotification("MQTT 连接失败，30 秒后重试")
+            delay(RECONNECT_DELAY_MS)
+        }
+    }
+
+    private suspend fun publishAcknowledgement(eventId: String) {
+        val settings = SettingsRepository(applicationContext).settings.first()
+        val secret = SecretStore(applicationContext).getDeviceHmacSecret()
+        val mqtt = client
+        if (eventId.isBlank() || settings.deviceId.isBlank() || secret.isBlank() || mqtt == null) {
+            AckWorker.enqueue(applicationContext, eventId)
+            return
+        }
+
+        runCatching {
+            mqtt.publishWith()
+                .topic("alert/${settings.deviceId}/ack")
+                .qos(MqttQos.AT_LEAST_ONCE)
+                .payload(MqttAcknowledgement.payload(eventId, settings.deviceId, secret))
+                .send()
+                .get(10, TimeUnit.SECONDS)
+        }.onFailure {
+            // HTTP/WorkManager remains a secondary path when MQTT is unavailable.
+            AckWorker.enqueue(applicationContext, eventId)
+        }
+    }
+
+    private fun buildNotification(text: String): Notification =
+        Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle("告警通道")
+            .setContentText(text)
+            .setOngoing(true)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .build()
+
+    private fun updateNotification(text: String) {
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIFICATION_ID, buildNotification(text))
+    }
+
+    private fun createChannel() {
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                "告警通道",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "低功耗自建 MQTT 通道状态"
+                setSound(null, null)
             }
+        )
     }
 
     private suspend fun connect() {
@@ -114,7 +173,7 @@ class MqttTransportService : Service() {
 
         val connectBuilder = mqtt.connectWith()
             .cleanStart(false)
-            .sessionExpiryInterval(3_600)
+            .sessionExpiryInterval(86_400)
             .keepAlive(300)
 
         if (settings.mqttUsername.isNotBlank()) {
@@ -132,33 +191,6 @@ class MqttTransportService : Service() {
             // enabled so HiveMQ auto-reconnect and KernelSU Guardian can recover.
             updateNotification("MQTT 正在重连")
         }
-    }
-
-    private fun buildNotification(text: String): Notification =
-        Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("告警通道")
-            .setContentText(text)
-            .setOngoing(true)
-            .setCategory(Notification.CATEGORY_SERVICE)
-            .build()
-
-    private fun updateNotification(text: String) {
-        getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification(text))
-    }
-
-    private fun createChannel() {
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                "告警通道",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "低功耗自建 MQTT 通道状态"
-                setSound(null, null)
-            }
-        )
     }
 
     private fun stopTransport() {
@@ -184,8 +216,11 @@ class MqttTransportService : Service() {
     companion object {
         const val ACTION_START = "dev.chanooh.alert.action.START_MQTT"
         const val ACTION_STOP = "dev.chanooh.alert.action.STOP_MQTT"
+        const val ACTION_ACK = "dev.chanooh.alert.action.MQTT_ACK"
+        const val EXTRA_EVENT_ID = "event_id"
         private const val CHANNEL_ID = "transport_status"
         private const val NOTIFICATION_ID = 8001
+        private const val RECONNECT_DELAY_MS = 30_000L
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, MqttTransportService::class.java).apply {
@@ -196,6 +231,14 @@ class MqttTransportService : Service() {
         fun stop(context: Context) {
             context.startService(Intent(context, MqttTransportService::class.java).apply {
                 action = ACTION_STOP
+            })
+        }
+
+        fun acknowledge(context: Context, eventId: String) {
+            if (eventId.isBlank()) return
+            context.startForegroundService(Intent(context, MqttTransportService::class.java).apply {
+                action = ACTION_ACK
+                putExtra(EXTRA_EVENT_ID, eventId)
             })
         }
     }

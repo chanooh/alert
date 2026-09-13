@@ -6,11 +6,11 @@ import android.app.NotificationManager
 import android.content.Context
 import dev.chanooh.alert.alarm.CriticalAlarmService
 import dev.chanooh.alert.alarm.UrgentAlertService
-import dev.chanooh.alert.network.AckWorker
 import dev.chanooh.alert.security.AlertVerifier
 import dev.chanooh.alert.security.SecretStore
 import dev.chanooh.alert.settings.AppSettings
 import dev.chanooh.alert.settings.SettingsRepository
+import dev.chanooh.alert.transport.MqttTransportService
 import kotlinx.coroutines.flow.first
 
 class AlertDispatcher(private val context: Context) {
@@ -24,6 +24,12 @@ class AlertDispatcher(private val context: Context) {
 
         val isFirstDelivery = deduplicator.tryReserve(event.id)
         if (!isFirstDelivery) {
+            if (event.level != AlertLevel.CRITICAL) {
+                // The original delivery may have reached the phone while its old
+                // HTTP ACK failed. A QoS 1 retry is also an opportunity to repair
+                // that server state without showing the notification again.
+                MqttTransportService.acknowledge(context, event.id)
+            }
             // CRITICAL events remain in ActiveAlertStore until the user ACKs.
             // If HyperOS/root kills the app while the alarm is active, the
             // server retry must be able to re-arm the alarm after Guardian
@@ -55,17 +61,17 @@ class AlertDispatcher(private val context: Context) {
                         volumePercent = settings.criticalVolumePercent,
                         silentMode = settings.silentModeEnabled
                     )
-                    AckWorker.enqueue(context, event.id)
+                    MqttTransportService.acknowledge(context, event.id)
                     AlertHistoryStore.markAcknowledged(context, listOf(event.id))
                 }
                 AlertLevel.WARNING -> {
                     showNotification(event, NotificationManager.IMPORTANCE_DEFAULT, vibrate = true)
-                    AckWorker.enqueue(context, event.id)
+                    MqttTransportService.acknowledge(context, event.id)
                     AlertHistoryStore.markAcknowledged(context, listOf(event.id))
                 }
                 AlertLevel.INFO -> {
                     showNotification(event, NotificationManager.IMPORTANCE_LOW, vibrate = false)
-                    AckWorker.enqueue(context, event.id)
+                    MqttTransportService.acknowledge(context, event.id)
                     AlertHistoryStore.markAcknowledged(context, listOf(event.id))
                 }
             }

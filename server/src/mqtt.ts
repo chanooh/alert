@@ -1,8 +1,11 @@
 import mqtt, { type MqttClient } from "mqtt";
 import type { SignedAlert } from "./security.js";
 
+type AcknowledgementHandler = (topic: string, payload: Buffer) => void | Promise<void>;
+
 export class AlertMqttPublisher {
   private client: MqttClient | null = null;
+  private acknowledgementHandler: AcknowledgementHandler | null = null;
 
   constructor(
     private readonly url: string,
@@ -18,6 +21,9 @@ export class AlertMqttPublisher {
       clean: true,
       reconnectPeriod: 5_000,
       connectTimeout: 10_000,
+    });
+    this.client.on("message", (topic, payload) => {
+      void this.acknowledgementHandler?.(topic, payload);
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -36,6 +42,17 @@ export class AlertMqttPublisher {
       };
       client.once("connect", onConnect);
       client.once("error", onError);
+    });
+  }
+
+  async subscribeAcknowledgements(handler: AcknowledgementHandler): Promise<void> {
+    if (!this.client) await this.connect();
+    this.acknowledgementHandler = handler;
+    await new Promise<void>((resolve, reject) => {
+      this.client!.subscribe("alert/+/ack", { qos: 1 }, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
     });
   }
 

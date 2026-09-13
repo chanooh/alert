@@ -20,7 +20,7 @@ Your event source
 Alert server
     |-- UUID event ID
     |-- HMAC-SHA256 signature
-    |-- persistent pending/ACK state
+    |-- persistent pending/ACK state (up to 24 hours)
     |-- retry while pending
     v
 Self-hosted MQTT broker (QoS 1)
@@ -36,10 +36,15 @@ Alert dispatcher
     |-- info     -> notification -> automatic durable ACK
     |-- warning  -> notification + vibration -> automatic durable ACK
     |-- urgent   -> dedicated foreground alert service -> automatic durable ACK
-    `-- critical -> full-screen alarm path -> explicit user ACK -> durable ACK upload
+    `-- critical -> full-screen alarm path -> explicit user ACK -> signed MQTT ACK
 ```
 
-ACK uploads use WorkManager, so a temporary loss of network does not require the user to keep the alert screen open. The server keeps pending state and retries unacknowledged events. Active critical IDs are persisted so a server retry can re-arm an unacknowledged critical alert after the Android process has died and the transport is restored.
+Automatic ACKs travel back on the already-established MQTT connection and are
+HMAC-signed with the device secret. The previous HTTP/WorkManager ACK remains a
+fallback when MQTT is unavailable. Mosquitto persists the device's QoS 1 session
+and can queue an alert for up to 24 hours while the app reconnects. Active
+critical IDs are persisted so a server retry can re-arm an unacknowledged critical
+alert after the Android process has died and the transport is restored.
 
 The notification tab keeps the latest 100 events locally. Long messages can be
 expanded or collapsed, individual entries can be deleted from the local inbox,
@@ -75,7 +80,10 @@ Installation-specific values are entered in the Material 3 control center on the
 
 Sensitive values such as the device API token, HMAC secret, and MQTT password are encrypted with an Android Keystore-backed AES-GCM key. UI fields containing identifiers/secrets are masked/redacted rather than rendered as plain persisted values.
 
-The MQTT transport runs as a foreground service, uses QoS 1, and reconnects automatically. When MQTT is enabled, the app also records a private marker used by the optional KernelSU Guardian.
+The MQTT transport runs as a foreground service, uses QoS 1, retains its broker
+session for 24 hours, and continues retrying an initial failed connection instead
+of stopping itself. When MQTT is enabled, the app also records a private marker
+used by the optional KernelSU Guardian.
 
 ## Root / KernelSU reliability
 

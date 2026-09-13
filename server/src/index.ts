@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { AlertMqttPublisher } from "./mqtt.js";
-import { secureEqual, signAlert, type SignedAlert } from "./security.js";
+import {
+  secureEqual,
+  signAlert,
+  type SignedAcknowledgement,
+  type SignedAlert,
+  verifyAcknowledgement,
+} from "./security.js";
 import { AlertStore } from "./store.js";
 
 const required = (name: string): string => {
@@ -26,6 +32,21 @@ const publisher = new AlertMqttPublisher(
   process.env.MQTT_PASSWORD,
 );
 await publisher.connect();
+await publisher.subscribeAcknowledgements(async (topic, payload) => {
+  let acknowledgement: SignedAcknowledgement;
+  try {
+    acknowledgement = JSON.parse(payload.toString("utf8")) as SignedAcknowledgement;
+  } catch {
+    return;
+  }
+
+  if (topic !== `alert/${acknowledgement.deviceId}/ack`) return;
+  if (!verifyAcknowledgement(acknowledgement, hmacSecret)) return;
+
+  const record = store.get(acknowledgement.id);
+  if (!record || record.deviceId !== acknowledgement.deviceId) return;
+  await store.acknowledge(record.id, Date.now());
+});
 
 const app = express();
 app.disable("x-powered-by");

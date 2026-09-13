@@ -68,7 +68,7 @@ export class AlertStore {
     const retryAfter = [0, 30_000, 60_000, 120_000, 300_000];
     return [...this.records.values()].filter((record) => {
       if (record.status !== "pending") return false;
-      if (now - record.createdAt > 15 * 60_000) return false;
+      if (now - record.createdAt > 24 * 60 * 60_000) return false;
       const delay = retryAfter[Math.min(record.attempts, retryAfter.length - 1)];
       return record.lastSentAt === null || now - record.lastSentAt >= delay;
     });

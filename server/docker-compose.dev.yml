@@ -5,6 +5,7 @@ services:
       - "1883:1883"
     volumes:
       - ./mosquitto.dev.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt-data:/mosquitto/data
 
   alert-server:
     build: .
@@ -21,3 +22,4 @@ services:
 
 volumes:
   alert-data:
+  mqtt-data:
