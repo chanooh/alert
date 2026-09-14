@@ -78,6 +78,7 @@ class MqttTransportService : Service() {
         val mqtt = client
         if (eventId.isBlank() || settings.deviceId.isBlank() || secret.isBlank() || mqtt == null) {
             AckWorker.enqueue(applicationContext, eventId)
+            updateNotification("MQTT 未连接，回执将重试")
             return
         }
 
@@ -88,9 +89,12 @@ class MqttTransportService : Service() {
                 .payload(MqttAcknowledgement.payload(eventId, settings.deviceId, secret))
                 .send()
                 .get(10, TimeUnit.SECONDS)
+        }.onSuccess {
+            updateNotification("MQTT 已连接")
         }.onFailure {
             // HTTP/WorkManager remains a secondary path when MQTT is unavailable.
             AckWorker.enqueue(applicationContext, eventId)
+            updateNotification("MQTT 回执失败，将重试")
         }
     }
 
