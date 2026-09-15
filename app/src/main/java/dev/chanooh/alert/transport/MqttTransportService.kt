@@ -33,6 +33,7 @@ class MqttTransportService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var client: Mqtt5AsyncClient? = null
     private var connectJob: Job? = null
+    private var heartbeatJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -151,7 +152,7 @@ class MqttTransportService : Service() {
             .automaticReconnectWithDefaultConfig()
             .addConnectedListener {
                 GuardianMarker.setEnabled(applicationContext, true)
-                updateNotification("Armed · MQTT connected")
+                updateNotification("MQTT 已连接，正在订阅…")
                 mqtt.subscribeWith()
                     .topicFilter(topic)
                     .qos(MqttQos.AT_LEAST_ONCE)
@@ -165,10 +166,17 @@ class MqttTransportService : Service() {
                     }
                     .send()
                     .whenComplete { _, error ->
-                        if (error != null) updateNotification("MQTT connected · subscription retrying")
+                        if (error != null) {
+                            updateNotification("MQTT 已连接，订阅失败，正在重试")
+                        } else {
+                            startHeartbeat()
+                            updateNotification("MQTT 已连接")
+                        }
                     }
             }
             .addDisconnectedListener {
+                heartbeatJob?.cancel()
+                heartbeatJob = null
                 updateNotification("MQTT reconnecting")
                 if (connectJob?.isActive != true) {
                     connectJob = scope.launch {
@@ -198,9 +206,22 @@ class MqttTransportService : Service() {
         connectBuilder.send().get(15, TimeUnit.SECONDS)
     }
 
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        GuardianMarker.recordHealthyTransport(applicationContext)
+        heartbeatJob = scope.launch {
+            while (currentCoroutineContext().isActive) {
+                delay(HEARTBEAT_INTERVAL_MS)
+                GuardianMarker.recordHealthyTransport(applicationContext)
+            }
+        }
+    }
+
     private fun stopTransport() {
         connectJob?.cancel()
         connectJob = null
+        heartbeatJob?.cancel()
+        heartbeatJob = null
         runCatching { client?.disconnect() }
         client = null
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -210,6 +231,8 @@ class MqttTransportService : Service() {
     override fun onDestroy() {
         connectJob?.cancel()
         connectJob = null
+        heartbeatJob?.cancel()
+        heartbeatJob = null
         runCatching { client?.disconnect() }
         client = null
         scope.cancel()
@@ -226,6 +249,7 @@ class MqttTransportService : Service() {
         private const val CHANNEL_ID = "transport_status"
         private const val NOTIFICATION_ID = 8001
         private const val RECONNECT_DELAY_MS = 30_000L
+        private const val HEARTBEAT_INTERVAL_MS = 60_000L
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, MqttTransportService::class.java).apply {

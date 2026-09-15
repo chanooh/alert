@@ -87,7 +87,16 @@ used by the optional KernelSU Guardian.
 
 ## Root / KernelSU reliability
 
-`root/alert-guardian` is optional. It does not carry alert traffic itself. Its late-start `service.sh` checks every 300 seconds and, only when the app previously enabled MQTT, requests a restart of the MQTT foreground service if that service is missing. It also applies a small set of best-effort background/Doze allowances.
+`root/alert-guardian` is optional. It does not carry alert traffic itself. Its
+late-start `service.sh` checks every 60 seconds by default and, only when the
+app previously enabled MQTT, requests a restart if Android no longer lists the
+MQTT foreground service. With App 0.1.7+, the Guardian also watches a private
+MQTT-health heartbeat so it can recover a stale transport that still appears as
+running. It also applies a small set of best-effort background/Doze allowances.
+
+The Guardian's KernelSU WebUI shows the local service/heartbeat/Doze state and
+recent Guardian log, and offers a manual restart plus fixed 30/60/300-second
+check intervals. It exposes neither alert content nor any transport secret.
 
 ### Root DND override
 
