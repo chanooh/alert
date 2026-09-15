@@ -42,7 +42,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      - name: Verify Android SDK command-line tools
+        run: sdkmanager --version
       - name: Install Android SDK 36
         run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
