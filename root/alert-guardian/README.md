@@ -57,3 +57,7 @@ root shell, network endpoint, device token, or alert contents.
 Use a current KernelSU Manager build with module WebUI support; on older Manager
 versions, the existing **Action** button remains available for a one-shot status
 and recovery check.
+
+Version 0.2.1 uses KernelSU's injected asynchronous WebUI bridge directly, so
+the status controls do not rely on a browser module resolver or an external Web
+asset.
