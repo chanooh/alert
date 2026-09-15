@@ -53,3 +53,7 @@ Open **WebUI** on the Alert Guardian module card in KernelSU Manager. It reports
 The only controls are an explicit MQTT transport restart and three fixed
 check intervals (30, 60, or 300 seconds). The WebUI does not expose an arbitrary
 root shell, network endpoint, device token, or alert contents.
+
+Use a current KernelSU Manager build with module WebUI support; on older Manager
+versions, the existing **Action** button remains available for a one-shot status
+and recovery check.
