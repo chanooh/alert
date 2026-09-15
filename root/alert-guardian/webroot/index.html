@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alert Guardian</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #101114; color: #f1f3f5; }
+    body { margin: 0; padding: 18px; } h1 { font-size: 23px; margin: 0 0 6px; }
+    p { color: #b8c0cc; margin: 0 0 18px; line-height: 1.45; }
+    section { background: #1a1d23; border: 1px solid #303640; border-radius: 14px; padding: 14px; margin: 12px 0; }
+    button { border: 0; border-radius: 10px; padding: 11px 13px; margin: 5px 5px 0 0; background: #4f8cff; color: white; font-weight: 650; }
+    button.secondary { background: #303640; } button.warn { background: #b65b38; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, monospace; color: #d7dde7; margin: 0; }
+    .hint { font-size: 13px; color: #aeb8c8; } .error { color: #ff9b87; }
+  </style>
+</head>
+<body>
+  <h1>Alert Guardian</h1>
+  <p>MQTT 通道守护与恢复控制台。状态来自本机，不上传任何告警内容或密钥。</p>
+  <section>
+    <strong>当前状态</strong>
+    <pre id="status">正在读取…</pre>
+    <button onclick="refreshStatus()">刷新状态</button>
+    <button class="warn" onclick="restartTransport()">立即重启 MQTT 通道</button>
+  </section>
+  <section>
+    <strong>巡检频率</strong>
+    <p class="hint">更短的频率恢复更快，也会略增耗电。默认 60 秒。</p>
+    <button class="secondary" onclick="setIntervalSeconds(30)">30 秒</button>
+    <button class="secondary" onclick="setIntervalSeconds(60)">60 秒</button>
+    <button class="secondary" onclick="setIntervalSeconds(300)">5 分钟</button>
+  </section>
+  <p id="message" class="hint"></p>
+  <script>
+    const root = '/data/adb/modules/alert_guardian';
+    const status = document.querySelector('#status');
+    const message = document.querySelector('#message');
+
+    function run(command) {
+      return new Promise((resolve, reject) => {
+        if (!window.ksu || typeof window.ksu.exec !== 'function') {
+          reject(new Error('未检测到 KernelSU WebUI API；请使用支持 WebUI 的 KernelSU Manager。'));
+          return;
+        }
+        const callback = `alert_guardian_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+        window[callback] = (errno, stdout, stderr) => {
+          delete window[callback];
+          if (errno === 0) resolve(stdout || '');
+          else reject(new Error(stderr || `命令失败 (${errno})`));
+        };
+        try {
+          window.ksu.exec(command, '{}', callback);
+        } catch (error) {
+          delete window[callback];
+          reject(error);
+        }
+      });
+    }
+
+    window.refreshStatus = async () => {
+      try {
+        status.textContent = await run(`sh ${root}/status.sh`);
+        message.textContent = `已刷新：${new Date().toLocaleTimeString()}`;
+        message.className = 'hint';
+      } catch (error) {
+        message.textContent = error.message;
+        message.className = 'error';
+      }
+    };
+
+    window.restartTransport = async () => {
+      try {
+        message.textContent = await run(`sh ${root}/restart.sh`);
+        message.className = 'hint';
+        setTimeout(window.refreshStatus, 1500);
+      } catch (error) {
+        message.textContent = error.message;
+        message.className = 'error';
+      }
+    };
+
+    window.setIntervalSeconds = async (seconds) => {
+      try {
+        message.textContent = await run(`sh ${root}/set-interval.sh ${seconds}`);
+        message.className = 'hint';
+        await window.refreshStatus();
+      } catch (error) {
+        message.textContent = error.message;
+        message.className = 'error';
+      }
+    };
+
+    window.refreshStatus();
+  </script>
+</body>
+</html>

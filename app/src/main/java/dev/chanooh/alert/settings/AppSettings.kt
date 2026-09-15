@@ -3,9 +3,13 @@ package dev.chanooh.alert.settings
 data class AppSettings(
     val serverBaseUrl: String = "",
     val mqttBroker: String = "",
+    val mqttUsername: String = "",
+    val mqttEnabled: Boolean = false,
     val deviceId: String = "",
     val criticalVolumePercent: Int = 100,
-    val restoreVolumeAfterAck: Boolean = true
+    val restoreVolumeAfterAck: Boolean = true,
+    val rootDndOverrideEnabled: Boolean = false,
+    val silentModeEnabled: Boolean = false
 )
 
 fun String.redacted(): String {

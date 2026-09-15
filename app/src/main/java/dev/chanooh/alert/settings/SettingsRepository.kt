@@ -15,18 +15,26 @@ class SettingsRepository(private val context: Context) {
     private object Keys {
         val serverBaseUrl = stringPreferencesKey("server_base_url")
         val mqttBroker = stringPreferencesKey("mqtt_broker")
+        val mqttUsername = stringPreferencesKey("mqtt_username")
+        val mqttEnabled = booleanPreferencesKey("mqtt_enabled")
         val deviceId = stringPreferencesKey("device_id")
         val criticalVolumePercent = intPreferencesKey("critical_volume_percent")
         val restoreVolumeAfterAck = booleanPreferencesKey("restore_volume_after_ack")
+        val rootDndOverrideEnabled = booleanPreferencesKey("root_dnd_override_enabled")
+        val silentModeEnabled = booleanPreferencesKey("silent_mode_enabled")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
         AppSettings(
             serverBaseUrl = prefs[Keys.serverBaseUrl].orEmpty(),
             mqttBroker = prefs[Keys.mqttBroker].orEmpty(),
+            mqttUsername = prefs[Keys.mqttUsername].orEmpty(),
+            mqttEnabled = prefs[Keys.mqttEnabled] ?: false,
             deviceId = prefs[Keys.deviceId].orEmpty(),
             criticalVolumePercent = prefs[Keys.criticalVolumePercent] ?: 100,
-            restoreVolumeAfterAck = prefs[Keys.restoreVolumeAfterAck] ?: true
+            restoreVolumeAfterAck = prefs[Keys.restoreVolumeAfterAck] ?: true,
+            rootDndOverrideEnabled = prefs[Keys.rootDndOverrideEnabled] ?: false,
+            silentModeEnabled = prefs[Keys.silentModeEnabled] ?: false
         )
     }
 
@@ -34,9 +42,13 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit { prefs ->
             prefs[Keys.serverBaseUrl] = settings.serverBaseUrl.trim()
             prefs[Keys.mqttBroker] = settings.mqttBroker.trim()
+            prefs[Keys.mqttUsername] = settings.mqttUsername.trim()
+            prefs[Keys.mqttEnabled] = settings.mqttEnabled
             prefs[Keys.deviceId] = settings.deviceId.trim()
             prefs[Keys.criticalVolumePercent] = settings.criticalVolumePercent.coerceIn(10, 100)
             prefs[Keys.restoreVolumeAfterAck] = settings.restoreVolumeAfterAck
+            prefs[Keys.rootDndOverrideEnabled] = settings.rootDndOverrideEnabled
+            prefs[Keys.silentModeEnabled] = settings.silentModeEnabled
         }
     }
 }
