@@ -10,17 +10,17 @@ import dev.chanooh.alert.security.AlertVerifier
 import dev.chanooh.alert.security.SecretStore
 import dev.chanooh.alert.settings.AppSettings
 import dev.chanooh.alert.settings.SettingsRepository
-import dev.chanooh.alert.transport.MqttTransportService
+import dev.chanooh.alert.network.AckWorker
 import kotlinx.coroutines.flow.first
 
 class AlertDispatcher(private val context: Context) {
     private val deduplicator = EventDeduplicator(context)
     private val activeStore = ActiveAlertStore(context)
 
-    suspend fun handle(event: AlertEvent) {
+    suspend fun handle(event: AlertEvent): DispatchResult {
         val settings = SettingsRepository(context).settings.first()
         val secret = SecretStore(context).getDeviceHmacSecret()
-        if (!AlertVerifier.verify(event, settings.deviceId, secret)) return
+        if (!AlertVerifier.verify(event, settings.deviceId, secret)) return DispatchResult.REJECTED
 
         val isFirstDelivery = deduplicator.tryReserve(event.id)
         if (!isFirstDelivery) {
@@ -28,7 +28,7 @@ class AlertDispatcher(private val context: Context) {
                 // The original delivery may have reached the phone while its old
                 // HTTP ACK failed. A QoS 1 retry is also an opportunity to repair
                 // that server state without showing the notification again.
-                MqttTransportService.acknowledge(context, event.id)
+                AckWorker.acknowledge(context, event.id)
             }
             // CRITICAL events remain in ActiveAlertStore until the user ACKs.
             // If HyperOS/root kills the app while the alarm is active, the
@@ -37,7 +37,7 @@ class AlertDispatcher(private val context: Context) {
             if (event.level == AlertLevel.CRITICAL && activeStore.contains(event.id)) {
                 ensureCriticalAlarm(event, settings)
             }
-            return
+            return DispatchResult.DUPLICATE
         }
 
         AlertHistoryStore.record(context, event)
@@ -61,17 +61,17 @@ class AlertDispatcher(private val context: Context) {
                         volumePercent = settings.criticalVolumePercent,
                         silentMode = settings.silentModeEnabled
                     )
-                    MqttTransportService.acknowledge(context, event.id)
+                    AckWorker.acknowledge(context, event.id)
                     AlertHistoryStore.markAcknowledged(context, listOf(event.id))
                 }
                 AlertLevel.WARNING -> {
                     showNotification(event, NotificationManager.IMPORTANCE_DEFAULT, vibrate = true)
-                    MqttTransportService.acknowledge(context, event.id)
+                    AckWorker.acknowledge(context, event.id)
                     AlertHistoryStore.markAcknowledged(context, listOf(event.id))
                 }
                 AlertLevel.INFO -> {
                     showNotification(event, NotificationManager.IMPORTANCE_LOW, vibrate = false)
-                    MqttTransportService.acknowledge(context, event.id)
+                    AckWorker.acknowledge(context, event.id)
                     AlertHistoryStore.markAcknowledged(context, listOf(event.id))
                 }
             }
@@ -79,6 +79,7 @@ class AlertDispatcher(private val context: Context) {
             deduplicator.forget(event.id)
             throw error
         }
+        return DispatchResult.PROCESSED
     }
 
     private fun ensureCriticalAlarm(event: AlertEvent, settings: AppSettings) {
@@ -125,3 +126,5 @@ class AlertDispatcher(private val context: Context) {
         )
     }
 }
+
+enum class DispatchResult { PROCESSED, DUPLICATE, REJECTED }

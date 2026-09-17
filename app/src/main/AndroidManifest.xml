@@ -56,20 +56,21 @@
                 android:value="Persistent self-hosted transport for user-owned critical alerts" />
         </service>
 
+        <service
+            android:name=".transport.RootIngressService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Short-lived processing of signed events delivered by the user-owned KernelSU module" />
+        </service>
+
         <receiver
             android:name=".system.BootReceiver"
             android:enabled="true"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
-
-        <receiver
-            android:name=".push.MiPushMessageReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.xiaomi.mipush.RECEIVE_MESSAGE" />
             </intent-filter>
         </receiver>
 

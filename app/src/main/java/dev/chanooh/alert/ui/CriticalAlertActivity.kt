@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.sp
 import dev.chanooh.alert.alarm.CriticalAlarmService
 import dev.chanooh.alert.alert.ActiveAlertStore
 import dev.chanooh.alert.alert.AlertHistoryStore
-import dev.chanooh.alert.transport.MqttTransportService
+import dev.chanooh.alert.network.AckWorker
 import dev.chanooh.alert.ui.theme.AlertTheme
 
 class CriticalAlertActivity : ComponentActivity() {
@@ -46,7 +46,7 @@ class CriticalAlertActivity : ComponentActivity() {
                     onAcknowledge = {
                         val eventIds = ActiveAlertStore(applicationContext).drain()
                         eventIds.forEach { eventId ->
-                            MqttTransportService.acknowledge(applicationContext, eventId)
+                            AckWorker.acknowledge(applicationContext, eventId)
                         }
                         AlertHistoryStore.markAcknowledged(applicationContext, eventIds)
                         CriticalAlarmService.stop(this)

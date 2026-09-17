@@ -1,139 +1,79 @@
 # Alert
 
-Private Android alert terminal for high-priority personal events. The app is native Kotlin + Jetpack Compose + Material 3, with a self-hosted MQTT transport, signed events, durable ACK handling, and an optional KernelSU reliability layer.
+Personal Android alert terminal with signed MQTT events, durable acknowledgement,
+and a KernelSU-native transport designed for HyperOS devices that freeze normal
+background applications.
 
-## Current status
-
-- Active implementation branch: `feature/initial-alert-app`.
-- PR #1 (`Initial native Android alert app`) is merged into `main`.
-- Follow-up reliability, transport, testing, and device-acceptance work is reviewed from `feature/initial-alert-app` in PR #2.
-- GitHub Actions is the build/test source of truth. Reviewers do not need a local Android or Node build to verify the branch.
-- Alert 0.2 adds an optional Mi Push notification-bar fallback for Xiaomi /
-  HyperOS lock-screen delivery. MQTT remains the primary low-latency transport.
-
-## End-to-end flow
+## Alert 0.3 architecture
 
 ```text
-Your event source
-    |
-    | POST /api/alerts + admin API key
-    v
-Alert server
-    |-- UUID event ID
-    |-- HMAC-SHA256 signature
-    |-- persistent pending/ACK state (up to 24 hours)
-    |-- retry while pending
-    v
-Self-hosted MQTT broker (QoS 1)
-    |
-    v
-Android MQTT foreground service
-    |-- verify device ID
-    |-- reject stale events
-    |-- verify HMAC signature
-    |-- durable event-ID deduplication
-    v
-Alert dispatcher
-    |-- info     -> notification -> automatic durable ACK
-    |-- warning  -> notification + vibration -> automatic durable ACK
-    |-- urgent   -> dedicated foreground alert service -> automatic durable ACK
-    `-- critical -> full-screen alarm path -> explicit user ACK -> signed MQTT ACK
-
-If MQTT has not been ACKed in time, the server sends a single Mi Push
-notification-bar fallback to the device's registered Mi Push RegID: immediately
-for Critical, after 5 seconds for Urgent, and after 30 seconds for Warning/Info.
-The system notification is intentionally not a pass-through message: Xiaomi
-does not guarantee pass-through delivery while the app is not running. Provider
-delivery receipts are recorded separately and never replace the app's ACK.
+event source -> Alert server -> MQTT broker (QoS 1)
+                                 |
+                 KernelSU Root MQTT daemon (persistent session)
+                                 |
+                 private signed-event inbox + explicit ingress start
+                                 |
+                Alert app: HMAC verify -> notification/alarm -> HTTP ACK
 ```
 
-Automatic ACKs travel back on the already-established MQTT connection and are
-HMAC-signed with the device secret. The previous HTTP/WorkManager ACK remains a
-fallback when MQTT is unavailable. Mosquitto persists the device's QoS 1 session
-and can queue an alert for up to 24 hours while the app reconnects. Active
-critical IDs are persisted so a server retry can re-arm an unacknowledged critical
-alert after the Android process has died and the transport is restored.
+**KernelSU 接管** is the recommended mode on a rooted phone. Its native daemon
+holds the MQTT socket outside the App process; Alert wakes only to process a
+durably written event. The App validates every payload and retains the HMAC and
+device API token, so the module cannot forge or acknowledge alerts.
 
-The notification tab keeps the latest 100 events locally. Long messages can be
-expanded or collapsed, individual entries can be deleted from the local inbox,
-and **停止当前响铃** stops any active Urgent/Critical audio and vibration without
-acknowledging a Critical event.
+**App MQTT 备用** retains the original Android foreground-service client. It is
+the upgrade default so an existing installation keeps working before the new
+KernelSU module is installed, and remains useful for troubleshooting.
+
+There is no third-party push provider in 0.3. A powered-off device, disabled
+module, forced radio disconnect, or total network outage can still prevent
+immediate delivery.
 
 ## Alert levels
 
-| Level | Local behavior | ACK behavior |
+| Level | Phone behavior | ACK |
 | --- | --- | --- |
-| `info` | Normal low-attention notification | Automatic |
-| `warning` | Notification with vibration | Automatic |
-| `urgent` | Dedicated `UrgentAlertService` foreground service, alarm-stream audio, raised alarm volume, repeating vibration, and automatic stop after about 30 seconds; no full-screen activity | Automatic |
-| `critical` | Dedicated foreground alarm service, alarm-stream audio, configurable alarm volume, repeating vibration, wake lock, lock-screen visibility, screen-on request, and full-screen intent when Android permits it; continues until acknowledged | Manual, then durable WorkManager upload |
+| `info` | Low-attention notification | automatic |
+| `warning` | Notification and vibration | automatic |
+| `urgent` | Foreground alert service, alarm audio and repeating vibration for about 30 seconds | automatic |
+| `critical` | Lock-screen/full-screen foreground alarm until user confirms | manual |
 
-Full-screen presentation is subject to Android/HyperOS full-screen-intent policy and must be verified on the target device. A successful APK build does not prove OEM lock-screen behavior.
+Incoming events are HMAC-SHA256 signed, time-limited and deduplicated. The
+server retains pending events and retries MQTT for up to 24 hours. Automatic
+ACKs are attempted immediately through the App's authenticated HTTP endpoint;
+WorkManager retries failures. A Critical alert is only ACKed after the user
+confirms it.
 
-## Android configuration
+## Phone setup
 
-Installation-specific values are entered in the Material 3 control center on the phone:
+Enter these installation-specific values in Alert's Settings tab:
 
-- Server base URL
-- MQTT broker URL (`mqtt://` or `mqtts://`)
-- MQTT username/password (optional)
-- Device ID
-- Device API token
-- Device HMAC secret
-- Critical alarm volume
-- Restore-alarm-volume-after-ACK preference
-- Optional Root DND override
-- Persistent silent mode (notifications remain visible, but Urgent/Critical audio,
-  vibration, and alarm-volume changes are suppressed until it is turned off)
+- server URL;
+- MQTT broker URL (`mqtt://` or `mqtts://`) and optional username/password;
+- device ID, device API token and HMAC secret;
+- alarm behavior and optional Root DND override.
 
-Sensitive values such as the device API token, HMAC secret, and MQTT password are encrypted with an Android Keystore-backed AES-GCM key. UI fields containing identifiers/secrets are masked/redacted rather than rendered as plain persisted values.
+The App stores the API token, HMAC key and MQTT password with Android Keystore
+backed encryption. UI fields are masked. In Root mode the App writes only broker
+credentials and device ID to its own private `root_transport/config.json`; the
+HMAC key and API token are never written there or to `/data/adb`.
 
-The MQTT transport runs as a foreground service, uses QoS 1, retains its broker
-session for 24 hours, and continues retrying an initial failed connection instead
-of stopping itself. When MQTT is enabled, the app also records a private marker
-used by the optional KernelSU Guardian.
+### Recommended Root installation
 
-## Root / KernelSU reliability
+1. Install the signed `alert-release-apk` from a green GitHub Actions run.
+2. Flash the matching `alert-guardian-kernelsu` ZIP in KernelSU Manager and reboot.
+3. Open Alert, verify the existing settings, select **KernelSU 接管（推荐）**, then
+   tap **保存并应用**.
+4. In the Guardian WebUI, wait for `Root MQTT daemon: running` and transport
+   status `subscribed` / `Root MQTT 已订阅`.
+5. Lock the device, send an `urgent` test, then a `critical` test. Test Wi-Fi
+   and mobile-data transitions separately.
 
-`root/alert-guardian` is optional. It does not carry alert traffic itself. Its
-late-start `service.sh` checks every 5 minutes by default and, only when the
-app previously enabled MQTT, requests a restart if Android no longer lists the
-MQTT foreground service. With App 0.1.7+, the Guardian also watches a private
-MQTT-health heartbeat so it can recover a stale transport that still appears as
-running. It also applies a small set of best-effort background/Doze allowances.
+Selecting **App MQTT 备用** and saving disables Root configuration and restores
+the App foreground MQTT transport without uninstalling the module.
 
-The Guardian's KernelSU WebUI shows the local service/heartbeat/Doze state and
-recent Guardian log, and offers a manual restart plus fixed 5/15-minute check
-intervals. Automatic recovery is limited to one request per 15 minutes; it
-exposes neither alert content nor any transport secret.
-
-## Mi Push fallback setup
-
-Create the mainland-China `dev.chanooh.alert` application in Xiaomi Push,
-download its official client AAR, and place it at
-`app/libs/MiPush_SDK_Client.aar`. Store the AAR SHA-256 in GitHub secret
-`MIPUSH_SDK_SHA256`; store the client `MIPUSH_APP_ID` and `MIPUSH_APP_KEY` as
-GitHub secrets for the signed APK build. Do **not** place `AppSecret` in GitHub
-or Android: set it only in the server `.env` together with a random
-`MIPUSH_CALLBACK_TOKEN` and a public callback URL such as
-`http://YOUR_SERVER:8787/api/mipush/receipts/YOUR_RANDOM_TOKEN`.
-
-After installing the signed APK and saving the existing server/device fields,
-open Alert once. The app registers its Mi Push RegID and uploads it through the
-existing device bearer token. The settings page then shows `已注册并同步`.
-
-### Root DND override
-
-The app also has an explicit **Root DND override** option for rooted private devices. When enabled for a critical alert and Android reports an active DND filter (`priority`, `alarms only`, or `total silence`), the app uses a root `cmd notification set_dnd` command to temporarily disable DND and attempts to restore the previous interruption-filter level when the critical alert is stopped/acknowledged.
-
-This path is intentionally opt-in and has important limits:
-
-- Normal notification-channel DND bypass is not treated as a hard guarantee for every Android/HyperOS DND policy.
-- Root override restores the previous **interruption filter level**, not an exact snapshot of every OEM/automatic Zen rule.
-- The restore mode currently lives in the alarm-service process. If that process/device is killed or crashes while DND is temporarily disabled, automatic restoration is not guaranteed.
-- Root shell behavior can vary by HyperOS/Android build and therefore requires real-device acceptance testing.
-
-See [`docs/hyperos-3-device-acceptance.md`](docs/hyperos-3-device-acceptance.md) before enabling this path on a daily-use phone.
+The App's status card and Guardian WebUI show only daemon state, timestamps and
+inbox count; neither renders passwords, tokens, HMAC keys or alert content.
 
 ## Server configuration
 
@@ -144,108 +84,52 @@ cd server
 cp .env.example .env
 ```
 
-`server/.env.example` contains placeholders only. Real admin keys, device IDs, device API tokens, HMAC secrets, MQTT credentials, and Internet-facing endpoints must remain outside Git.
+The required server variables are `ADMIN_API_KEY`, `DEVICE_ID`,
+`DEVICE_API_TOKEN`, `DEVICE_HMAC_SECRET` and `MQTT_URL`; optional MQTT username
+and password enable broker authentication. Keep all real values outside Git.
 
-For local-only development, `docker-compose.dev.yml` includes an anonymous Mosquitto configuration. It is **development only** and must never be exposed directly to the public Internet.
-
-Example local request:
+Send an alert through the server API:
 
 ```bash
-curl -X POST http://127.0.0.1:8787/api/alerts \
+curl -X POST http://YOUR_SERVER:8787/api/alerts \
   -H 'Content-Type: application/json' \
-  -H 'x-api-key: YOUR_LOCAL_ADMIN_KEY' \
-  -d '{"level":"critical","title":"Test","message":"Critical path test"}'
+  -H 'x-api-key: YOUR_ADMIN_KEY' \
+  -d '{"level":"urgent","title":"Test","message":"Root MQTT delivery test"}'
 ```
 
-### Temporary development deployment (test only)
+For a short, private test deployment, `server/docker-compose.dev.yml` starts
+the server and Mosquitto. It intentionally allows plaintext HTTP/MQTT. This is
+only suitable for a controlled personal host and non-sensitive alerts: network
+observers could read alert text and the HTTP device token. Use HTTPS, `mqtts://`,
+authentication and firewall/VPN restrictions for a hardened deployment.
 
-For a short, isolated test on a disposable host, the development Compose stack can
-build and run both the alert server and Mosquitto without a local Node or Android
-build:
+## Verification and artifacts
 
-```bash
-git clone --branch feature/initial-alert-app https://github.com/chanooh/alert.git alert
-cd alert/server
-cp .env.example .env
-# Fill .env with newly generated test-only values; never commit this file.
-docker compose -f docker-compose.dev.yml up -d --build
-curl http://YOUR_SERVER_IP:8787/health
-```
+GitHub Actions builds and tests the server, Android App and Root daemon source.
+The Guardian job runs Go tests, cross-compiles stripped Android binaries for
+`arm64-v8a` and `armeabi-v7a`, then packages the KernelSU ZIP. A green workflow
+uploads:
 
-Configure the app with `http://YOUR_SERVER_IP:8787` and
-`mqtt://YOUR_SERVER_IP:1883`, using the same test device ID, API token, and HMAC
-secret as the server `.env`. Stop the stack as soon as testing is complete:
+- `alert-release-apk` — CI-signed Release APK;
+- `alert-guardian-kernelsu` — KernelSU module containing both Root daemon ABIs.
 
-```bash
-docker compose -f docker-compose.dev.yml down
-```
+CI cannot prove a vendor's lock-screen policy. Real-device acceptance must cover
+30-minute lock screen, long idle, network transitions, App freezer behavior,
+Critical re-alarm after a process death, Root daemon restart, and a return to
+App MQTT fallback.
 
-This stack intentionally uses anonymous, plaintext MQTT and HTTP. The current
-personal Release APK also permits cleartext HTTP so that automatic ACK uploads
-work with this simple deployment. It is appropriate only for a user-owned,
-access-controlled host and non-sensitive personal events: anyone able to observe
-the network path can read alert text and the device ACK bearer token. Do not use
-it on an untrusted network or for sensitive data. A hardened deployment requires
-authenticated MQTT over TLS (`mqtts://`), HTTPS, firewall or VPN restrictions,
-and rotated secrets.
+## Security boundaries
 
-## Automated verification and CI artifacts
-
-`.github/workflows/ci.yml` runs on `main` and `feature/**` pushes and on pull requests. A branch is not considered build-verified until the workflow for that exact head commit is green.
-
-The CI jobs verify:
-
-- **Server:** dependency install, TypeScript typecheck, automated Node tests (HMAC/canonical signing, constant-time credential comparison, persistent alert store, retry, and ACK behavior), then production TypeScript build.
-- **Android:** JVM unit tests for HMAC acceptance/rejection, device mismatch, bad signatures, and stale-event rejection, followed by `:app:assembleDebug` against Android API 36.
-- **Guardian:** packages the KernelSU module ZIP from the repository sources.
-
-Successful runs upload two review artifacts:
-
-- `alert-release-apk` — Release APK signed with the repository's private CI keystore.
-- `alert-guardian-kernelsu` — installable KernelSU Guardian ZIP.
-
-### Release signing
-
-The Android build reads `ANDROID_KEYSTORE_FILE`, `ANDROID_KEYSTORE_PASSWORD`,
-`ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` from the CI environment. The
-keystore itself is supplied through the encrypted `ANDROID_KEYSTORE_BASE64`
-repository secret and is never committed to Git. Keep a secure backup of the
-keystore and its passwords: Android will reject future updates if the signing
-key is lost or replaced.
-
-The exact run URL, head SHA, artifact digests, and success state should be taken from the latest GitHub Actions run for the branch/PR rather than copied from an older run.
-
-## Real-device acceptance
-
-CI proves compilation and automated logic tests; it cannot prove HyperOS background policy, notification permission UI, lock-screen/full-screen behavior, actual speaker/vibrator behavior, KernelSU root commands, or Guardian recovery after task/process termination.
-
-Use the dedicated checklist:
-
-- [`docs/hyperos-3-device-acceptance.md`](docs/hyperos-3-device-acceptance.md)
-
-Do not mark the project as HyperOS 3 device-verified until those steps have actually been executed on a device and the results recorded externally.
-
-## Security / privacy
-
-This repository is intended to remain safe to publish:
-
-- Never commit real server/broker endpoints, API keys, bearer tokens, HMAC/signing secrets, MQTT passwords, device identifiers, or personal alert/event data.
-- Never commit `.env`, `google-services.json`, signing keys, private certificates, production logs, or server runtime alert data.
-- Do not add opaque or untrusted AAR/JAR binaries. Dependencies should come from declared, reviewable upstream packages or official vendor integrations.
-- Device API tokens, HMAC secrets, and MQTT passwords live in Android Keystore-backed encrypted storage.
-- Server secrets come only from environment variables.
-- Incoming MQTT events are HMAC-signed; MQTT publish access alone is not enough to forge a valid accepted alert.
-- Use TLS (`https://` and `mqtts://`) for Internet-facing deployments.
-
-## Development / review
-
-PR #1 established the initial app and has already been merged. The current follow-up history remains on `feature/initial-alert-app` and is proposed to `main` through PR #2. Do not merge PR #2 solely because CI is green: HyperOS 3 + KernelSU runtime behavior still requires the real-device acceptance checklist above.
+- The server signs every accepted event; Root only relays raw signed JSON.
+- Root transport deliberately has access to MQTT credentials because the device
+  owner granted KernelSU root. It has no HMAC or device API token.
+- Never commit endpoints, credentials, device IDs, alert data, `.env`, signing
+  keys, runtime logs or build artifacts.
+- A rooted device is inherently a trusted personal-device model. Root transport
+  improves process survivability; it does not make a compromised phone safe.
 
 ## AI integration skill
 
-[`skills/alert-notifier/SKILL.md`](skills/alert-notifier/SKILL.md) is a reusable
-instruction file for another AI or coding agent. Give it to the agent when it
-needs to add event monitoring to a codebase and notify this Alert app. It uses
-runtime variables such as `ALERT_BASE_URL` and `ALERT_ADMIN_API_KEY`, keeps
-credentials out of source control, defines severity mapping, and requires
-caller-side de-duplication before calling `POST /api/alerts`.
+[`skills/alert-notifier/SKILL.md`](skills/alert-notifier/SKILL.md) documents
+how another coding agent can validate events and call `POST /api/alerts` with
+runtime-provided credentials.

@@ -23,7 +23,7 @@ Use artifacts from the GitHub Actions run for the exact commit under review. Do 
 
 Expected artifacts:
 
-- `alert-debug-apk`
+- `alert-release-apk`
 - `alert-guardian-kernelsu`
 
 Before testing, confirm the workflow run reports success for all three jobs:
@@ -36,8 +36,8 @@ The APK/ZIP from an older green run is not evidence for a newer commit.
 
 ## 2. Install the Android app
 
-1. Download/extract `alert-debug-apk` from the exact green Actions run.
-2. Install the debug APK on the HyperOS 3 test device using the normal package installer/ADB method chosen by the tester.
+1. Download/extract `alert-release-apk` from the exact green Actions run.
+2. Install the signed Release APK on the HyperOS 3 test device using the normal package installer/ADB method chosen by the tester.
 3. Launch **Alert** once.
 4. Confirm the Material 3 control center opens without crashing.
 5. Confirm no installation-specific endpoint/credential is pre-populated by the repository build.
@@ -79,11 +79,11 @@ Enter the deployment-specific values **only inside the app**:
 - Restore-alarm-volume-after-ACK preference.
 - Root DND override only if the root-specific test section below is intentionally being executed.
 
-Tap **Save & apply** and enable **Self-hosted MQTT transport**.
+Tap **保存并应用**. Before installing Guardian, keep **App MQTT 备用** selected.
 
 Acceptance observations:
 
-- The foreground transport notification should appear.
+- In App MQTT 备用 mode, the foreground transport notification should appear.
 - The transport should eventually report an armed/connected state when the broker is reachable.
 - Secrets/identifiers should remain masked in the UI rather than being shown as plain persisted values.
 - An invalid MQTT URI should fail safely and require configuration correction rather than creating repeated parallel connections.
@@ -159,52 +159,51 @@ Important: this section measures native Android/HyperOS behavior. `NotificationC
 
 Failure to sound in a restrictive DND mode is therefore not automatically a regression in the Root override path; continue with the rooted test below if that feature is part of the deployment requirement.
 
-## 9. Install KernelSU Guardian (optional reliability layer)
+## 9. Install KernelSU Guardian Root transport
 
 Use only the `alert-guardian-kernelsu` artifact produced by the exact green CI run. Do not install an AAR/ZIP/module obtained from an unreviewed third party.
 
 1. Confirm KernelSU is already working on the test device.
 2. Install the `alert-guardian-kernelsu` ZIP from KernelSU Manager.
 3. Reboot as required by KernelSU.
-4. Launch Alert after boot and confirm **Self-hosted MQTT transport** is enabled/configured.
-5. Confirm the transport foreground notification is present/connected.
+4. Launch Alert after boot, select **KernelSU 接管（推荐）**, then tap **保存并应用**.
+5. Confirm Guardian WebUI shows the Root daemon running and its transport state reaches `subscribed`.
 6. In KernelSU Manager, the Guardian module Action button may be used for a one-shot status/restart attempt.
 
 Guardian behavior to verify:
 
 - It waits for Android boot completion.
-- It only acts if the app's private `guardian_mqtt_enabled` marker exists.
-- It checks at a default interval of 300 seconds.
-- If the MQTT foreground service is absent, it issues an explicit rooted start request for `MqttTransportService`.
-- It does not carry MQTT traffic itself and does not continuously hold a wake lock.
+- It reads the private Root configuration created by Alert, not a marker file.
+- It owns the persistent MQTT session and reports `subscribed` without an App MQTT foreground notification.
+- It atomically writes an inbox item before explicitly starting `RootIngressService`.
+- It has no periodic App heartbeat/service dump and no continuous wake lock.
 
 ## 10. Swipe-away / task-removal test
 
 This is intentionally separate from Android **Force stop**.
 
-1. Ensure Alert MQTT is enabled and connected.
+1. Ensure Alert is in KernelSU 接管 mode and Guardian reports `subscribed`.
 2. Open Android Recents and swipe the Alert app task away.
 3. Do not press **Force stop** yet.
-4. Observe whether the MQTT foreground-service notification remains present.
+4. Confirm no App MQTT foreground-service notification is expected while idle.
 5. With the display off, send a new `critical` event.
 
 Expected result:
 
-- Removing the UI task should not by itself disable the intended MQTT foreground transport.
+- Removing the UI task should not by itself disable the Root MQTT transport.
 - The new critical alert should still be delivered and be acknowledgeable.
 
 Record the actual HyperOS result. OEM task-removal behavior cannot be reproduced by JVM tests or GitHub-hosted Android builds.
 
-## 11. Process/Force-stop recovery test with Guardian
+## 11. Process/Force-stop delivery test with Guardian
 
 This is the destructive reliability test and should only be run when KernelSU Guardian is installed and the tester accepts the possible recovery delay.
 
-1. Confirm MQTT is enabled/connected and the Guardian marker has been created by the app.
+1. Confirm Guardian reports Root MQTT `subscribed` and the inbox is empty.
 2. Force-stop/kill the Alert package using the chosen HyperOS/root test method.
-3. Confirm the Alert foreground transport disappears.
-4. Wait for Guardian's next check. The default loop is 300 seconds, so recovery is **not instantaneous**.
-5. Confirm Guardian requests the MQTT foreground service to start again and that the transport reconnects.
-6. Send a new `critical` event after recovery and verify delivery/ACK.
+3. Confirm the Root daemon remains running; it is outside the Alert package.
+4. Send a new `critical` event. Confirm Guardian records a pending inbox item, then starts Alert ingress.
+5. Verify delivery/ACK without opening Alert first.
 
 ### Unacknowledged-critical re-arm test
 
@@ -213,7 +212,7 @@ To verify the specific retry/re-arm protection:
 1. Send a fresh `critical` event and let it start ringing.
 2. **Do not ACK it.**
 3. Kill the app/process in the controlled test.
-4. Allow Guardian to restore the transport.
+4. Leave Guardian Root MQTT subscribed; it should receive the server retry.
 5. Leave the corresponding server event pending so the server retries it.
 6. Verify that receiving the duplicate event ID while it remains in the active-critical store re-arms the critical alarm instead of being discarded only by deduplication.
 7. ACK the re-armed alert and confirm the server eventually marks it acknowledged.

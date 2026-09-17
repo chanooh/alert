@@ -7,24 +7,6 @@ export type AlertRecord = SignedAlert & {
   attempts: number;
   lastSentAt: number | null;
   ackedAt: number | null;
-  fallbackDueAt: number;
-  miPush: {
-    status: "not_due" | "sending" | "sent" | "delivered" | "failed" | "unavailable";
-    attempts: number;
-    lastAttemptAt: number | null;
-    providerMessageId: string | null;
-    deliveredAt: number | null;
-    error: string | null;
-  };
-};
-
-const fallbackDelay = (level: SignedAlert["level"]): number => {
-  switch (level) {
-    case "critical": return 0;
-    case "urgent": return 5_000;
-    case "warning":
-    case "info": return 30_000;
-  }
 };
 
 export class AlertStore {
@@ -39,13 +21,9 @@ export class AlertStore {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as AlertRecord[];
       for (const record of parsed) {
-        this.records.set(record.id, {
-          ...record,
-          fallbackDueAt: record.fallbackDueAt ?? record.createdAt + fallbackDelay(record.level),
-          miPush: record.miPush ?? {
-            status: "not_due", attempts: 0, lastAttemptAt: null, providerMessageId: null, deliveredAt: null, error: null,
-          },
-        });
+        // Historical 0.2 records can contain vendor-fallback fields. Unknown
+        // JSON properties are intentionally ignored while preserving alert state.
+        this.records.set(record.id, record);
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -67,10 +45,6 @@ export class AlertStore {
       attempts: 0,
       lastSentAt: null,
       ackedAt: null,
-      fallbackDueAt: alert.createdAt + fallbackDelay(alert.level),
-      miPush: {
-        status: "not_due", attempts: 0, lastAttemptAt: null, providerMessageId: null, deliveredAt: null, error: null,
-      },
     };
     this.records.set(record.id, record);
     await this.persist();
@@ -102,58 +76,6 @@ export class AlertStore {
       const delay = retryAfter[Math.min(record.attempts, retryAfter.length - 1)];
       return record.lastSentAt === null || now - record.lastSentAt >= delay;
     });
-  }
-
-  pendingForMiPush(now: number): AlertRecord[] {
-    return [...this.records.values()].filter((record) =>
-      record.status === "pending" &&
-      now >= record.fallbackDueAt &&
-      ["not_due", "failed", "sending"].includes(record.miPush.status) &&
-      (record.miPush.lastAttemptAt === null || now - record.miPush.lastAttemptAt >= 60_000) &&
-      now - record.createdAt <= 24 * 60 * 60_000,
-    );
-  }
-
-  async markMiPushSending(id: string, now: number): Promise<void> {
-    const record = this.records.get(id);
-    if (!record || record.status === "acked") return;
-    record.miPush.status = "sending";
-    record.miPush.attempts += 1;
-    record.miPush.lastAttemptAt = now;
-    record.miPush.error = null;
-    await this.persist();
-  }
-
-  async markMiPushSent(id: string, providerMessageId: string): Promise<void> {
-    const record = this.records.get(id);
-    if (!record) return;
-    record.miPush.status = "sent";
-    record.miPush.providerMessageId = providerMessageId;
-    record.miPush.error = null;
-    await this.persist();
-  }
-
-  async markMiPushFailed(id: string, error: string): Promise<void> {
-    const record = this.records.get(id);
-    if (!record || record.status === "acked") return;
-    record.miPush.status = "failed";
-    record.miPush.error = error.slice(0, 256);
-    await this.persist();
-  }
-
-  async markMiPushUnavailable(id: string): Promise<void> {
-    const record = this.records.get(id);
-    if (!record || record.status === "acked") return;
-    record.miPush.status = "unavailable";
-    await this.persist();
-  }
-
-  async markMiPushDeliveredByProvider(id: string, deliveredAt: number): Promise<void> {
-    const record = this.records.get(id);
-    if (!record) return;
-    record.miPush.status = "delivered";
-    record.miPush.deliveredAt = deliveredAt;
-    await this.persist();
   }
 
   private persist(): Promise<void> {

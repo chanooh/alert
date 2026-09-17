@@ -16,10 +16,9 @@ import com.hivemq.client.mqtt.datatypes.MqttQos
 import com.hivemq.client.mqtt.mqtt5.Mqtt5AsyncClient
 import dev.chanooh.alert.alert.AlertDispatcher
 import dev.chanooh.alert.alert.AlertEvent
-import dev.chanooh.alert.network.AckWorker
 import dev.chanooh.alert.security.SecretStore
 import dev.chanooh.alert.settings.SettingsRepository
-import dev.chanooh.alert.system.GuardianMarker
+import dev.chanooh.alert.settings.TransportMode
 import java.net.URI
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -37,7 +36,6 @@ class MqttTransportService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var client: Mqtt5AsyncClient? = null
     private var connectJob: Job? = null
-    private var heartbeatJob: Job? = null
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     @Volatile private var transportReady = false
@@ -51,14 +49,7 @@ class MqttTransportService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                GuardianMarker.setEnabled(applicationContext, false)
                 stopTransport()
-            }
-            ACTION_ACK -> {
-                startForeground(NOTIFICATION_ID, buildNotification("正在确认告警…"))
-                intent.getStringExtra(EXTRA_EVENT_ID)?.let { eventId ->
-                    scope.launch { publishAcknowledgement(eventId) }
-                }
             }
             else -> {
                 startForeground(
@@ -79,37 +70,10 @@ class MqttTransportService : Service() {
         while (currentCoroutineContext().isActive) {
             val connected = runCatching { connect() }
             if (connected.isSuccess) return
-            // Keep the foreground service and Guardian marker active. A bad mobile
-            // network transition must not turn into a permanently dead transport.
-            GuardianMarker.setEnabled(applicationContext, true)
+            // A bad mobile network transition must not turn into a permanently
+            // dead fallback transport.
             updateNotification("MQTT 连接失败，30 秒后重试")
             delay(RECONNECT_DELAY_MS)
-        }
-    }
-
-    private suspend fun publishAcknowledgement(eventId: String) {
-        val settings = SettingsRepository(applicationContext).settings.first()
-        val secret = SecretStore(applicationContext).getDeviceHmacSecret()
-        val mqtt = client
-        if (eventId.isBlank() || settings.deviceId.isBlank() || secret.isBlank() || mqtt == null) {
-            AckWorker.enqueue(applicationContext, eventId)
-            updateNotification("MQTT 未连接，回执将重试")
-            return
-        }
-
-        runCatching {
-            mqtt.publishWith()
-                .topic("alert/${settings.deviceId}/ack")
-                .qos(MqttQos.AT_LEAST_ONCE)
-                .payload(MqttAcknowledgement.payload(eventId, settings.deviceId, secret))
-                .send()
-                .get(10, TimeUnit.SECONDS)
-        }.onSuccess {
-            updateNotification("MQTT 已连接")
-        }.onFailure {
-            // HTTP/WorkManager remains a secondary path when MQTT is unavailable.
-            AckWorker.enqueue(applicationContext, eventId)
-            updateNotification("MQTT 回执失败，将重试")
         }
     }
 
@@ -142,8 +106,8 @@ class MqttTransportService : Service() {
 
     private suspend fun connect() {
         val settings = SettingsRepository(applicationContext).settings.first()
-        if (!settings.mqttEnabled || settings.mqttBroker.isBlank() || settings.deviceId.isBlank()) {
-            GuardianMarker.setEnabled(applicationContext, false)
+        if (!settings.mqttEnabled || settings.transportMode != TransportMode.APP_FALLBACK ||
+            settings.mqttBroker.isBlank() || settings.deviceId.isBlank()) {
             stopTransport()
             return
         }
@@ -156,8 +120,6 @@ class MqttTransportService : Service() {
         val topic = "alert/${settings.deviceId}/events"
 
         transportReady = false
-        heartbeatJob?.cancel()
-        heartbeatJob = null
         runCatching { client?.disconnect()?.get(3, TimeUnit.SECONDS) }
         client = null
 
@@ -167,7 +129,6 @@ class MqttTransportService : Service() {
             .serverHost(host)
             .serverPort(port)
             .addConnectedListener {
-                GuardianMarker.setEnabled(applicationContext, true)
                 updateNotification("MQTT 已连接，正在订阅…")
                 mqtt.subscribeWith()
                     .topicFilter(topic)
@@ -187,15 +148,13 @@ class MqttTransportService : Service() {
                             updateNotification("MQTT 已连接，订阅失败，正在重试")
                             scheduleReconnect()
                         } else {
-                            startHeartbeat()
+                            transportReady = true
                             updateNotification("MQTT 已连接")
                         }
                     }
             }
             .addDisconnectedListener {
                 transportReady = false
-                heartbeatJob?.cancel()
-                heartbeatJob = null
                 updateNotification("MQTT reconnecting")
                 scheduleReconnect()
             }
@@ -216,27 +175,12 @@ class MqttTransportService : Service() {
                 .applySimpleAuth()
         }
 
-        GuardianMarker.setEnabled(applicationContext, true)
         connectBuilder.send().get(15, TimeUnit.SECONDS)
-    }
-
-    private fun startHeartbeat() {
-        heartbeatJob?.cancel()
-        transportReady = true
-        GuardianMarker.recordHealthyTransport(applicationContext)
-        heartbeatJob = scope.launch {
-            while (currentCoroutineContext().isActive) {
-                delay(HEARTBEAT_INTERVAL_MS)
-                GuardianMarker.recordHealthyTransport(applicationContext)
-            }
-        }
     }
 
     private fun stopTransport() {
         connectJob?.cancel()
         connectJob = null
-        heartbeatJob?.cancel()
-        heartbeatJob = null
         transportReady = false
         runCatching { client?.disconnect() }
         client = null
@@ -247,8 +191,6 @@ class MqttTransportService : Service() {
     override fun onDestroy() {
         connectJob?.cancel()
         connectJob = null
-        heartbeatJob?.cancel()
-        heartbeatJob = null
         transportReady = false
         runCatching { client?.disconnect() }
         client = null
@@ -263,12 +205,9 @@ class MqttTransportService : Service() {
     companion object {
         const val ACTION_START = "dev.chanooh.alert.action.START_MQTT"
         const val ACTION_STOP = "dev.chanooh.alert.action.STOP_MQTT"
-        const val ACTION_ACK = "dev.chanooh.alert.action.MQTT_ACK"
-        const val EXTRA_EVENT_ID = "event_id"
         private const val CHANNEL_ID = "transport_status"
         private const val NOTIFICATION_ID = 8001
         private const val RECONNECT_DELAY_MS = 30_000L
-        private const val HEARTBEAT_INTERVAL_MS = 300_000L
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, MqttTransportService::class.java).apply {
@@ -282,13 +221,6 @@ class MqttTransportService : Service() {
             })
         }
 
-        fun acknowledge(context: Context, eventId: String) {
-            if (eventId.isBlank()) return
-            context.startForegroundService(Intent(context, MqttTransportService::class.java).apply {
-                action = ACTION_ACK
-                putExtra(EXTRA_EVENT_ID, eventId)
-            })
-        }
     }
 
     private fun scheduleReconnect(delayMillis: Long = RECONNECT_DELAY_MS) {

@@ -1,65 +1,49 @@
 # Alert Guardian (KernelSU)
 
-Optional reliability layer for the Android Alert app.
+Root-owned, persistent MQTT transport for Alert 0.3+.
 
 ## What it does
 
-- Runs as a KernelSU `service.sh` late-start module.
-- Checks every **5 minutes** by default; WebUI can switch to 15 minutes for
-  lower idle power use. Automatic recovery has a 15-minute cooldown.
-- Does nothing unless the Android app previously enabled its self-hosted MQTT transport and left the private guardian marker.
-- If the MQTT foreground service is missing, explicitly requests Android to start that service again.
-- With Alert **0.2.0+**, also checks a private MQTT-health heartbeat. A stale
-  heartbeat triggers a safe foreground-service restart even when Android still
-  lists the service as running.
-- Applies a small set of best-effort AOSP background/Doze app-op allowances. Unsupported app-ops are ignored.
-- Keeps only the latest ~200 guardian log lines in the module directory.
-- Provides a KernelSU WebUI with local-only status, recent log lines, a manual
-  restart control, and fixed safe check-interval choices.
+- Starts an auditable, statically linked Go MQTT client from KernelSU late-start.
+- The daemon owns the QoS 1 persistent session outside the Android app process,
+  avoiding HyperOS application-freezer behavior.
+- It reads only Alert's private Root configuration after the user selects
+  **KernelSU 接管**. HMAC and HTTP device tokens never leave the app.
+- Every MQTT payload is atomically placed in Alert's private inbox before Root
+  explicitly starts a short-lived ingress foreground service.
+- Alert remains responsible for HMAC verification, history, notification,
+  alarms and ACKs. The daemon never logs alert payloads or ACKs alerts itself.
 
-The module does **not** modify SystemUI, hook framework code, patch Xiaomi databases, or continuously acquire a wake lock.
+## Power and recovery model
 
-## Why explicit start is used
+At idle, this is one native MQTT socket with a 300-second keepalive. There is
+no Android MQTT foreground service, heartbeat loop or periodic `dumpsys`.
+Configuration changes use filesystem notifications. If an event cannot be
+drained by Android, only the non-empty inbox is retried once a minute. The shell
+supervisor uses exponential backoff only if the daemon exits unexpectedly.
 
-Modern Android intentionally keeps a package in `FLAG_STOPPED` after a user force-stop. The guardian is outside the app process and runs as root, so it can issue an explicit component start when the user has intentionally enabled the guardian path. This is the recovery mechanism; the Android app is not expected to self-resurrect from force-stop.
+The module applies best-effort Doze/AppOps allowances at boot. It does not hook
+SystemUI, patch Xiaomi databases, modify framework code or hold a continuous
+WakeLock.
 
-## Power model
+## Install and switch
 
-The default 5-minute guardian interval is a recovery layer, not the primary
-reliability mechanism. It reads only the private heartbeat during its normal
-loop and avoids expensive service dumps; use 15 minutes when battery life is
-more important. MQTT remains the immediate path and Mi Push is the system-level
-fallback for a frozen HyperOS process.
+Install the CI-produced ZIP in KernelSU Manager and reboot. Then open Alert,
+choose **KernelSU 接管（推荐）** in the transport section, and tap
+**保存并应用**. This writes private MQTT configuration for Root and stops the
+App MQTT foreground service.
 
-The actual realtime transport remains MQTT in the Android foreground service with a 300-second MQTT keepalive. If you do not want the root fallback, simply do not install this module.
-
-## Install
-
-Package the contents of this directory as a KernelSU module ZIP so that
-`module.prop`, `service.sh`, `action.sh`, `webroot/`, and `skip_mount` are at
-the ZIP root, then install it from KernelSU Manager and reboot.
-
-Enable **Self-hosted MQTT transport** inside the Alert app before expecting Guardian to restart it.
-
-Use the KernelSU module **Action** button for a one-shot status check / restart attempt.
+Choose **App MQTT 备用** and save to disable Root configuration and return to
+the original Android foreground transport for troubleshooting or when the module
+is not installed.
 
 ## WebUI
 
-Open **WebUI** on the Alert Guardian module card in KernelSU Manager. It reports:
+WebUI reports whether Alert is installed, whether the daemon is alive, whether
+Root configuration exists, safe transport state, pending inbox count, Doze
+whitelist detection and recent logs. It has a single Root-daemon restart button.
+It never displays MQTT credentials, API tokens, HMAC keys or alert content.
 
-- whether Alert is installed and has enabled the Guardian marker;
-- whether Android lists the MQTT foreground service as running;
-- the age of the private MQTT health heartbeat (Alert 0.1.7+);
-- Doze whitelist detection and recent Guardian log entries.
-
-The only controls are an explicit MQTT transport restart and two fixed
-check intervals (300 or 900 seconds). The WebUI does not expose an arbitrary
-root shell, network endpoint, device token, or alert contents.
-
-Use a current KernelSU Manager build with module WebUI support; on older Manager
-versions, the existing **Action** button remains available for a one-shot status
-and recovery check.
-
-Version 0.2.1 uses KernelSU's injected asynchronous WebUI bridge directly, so
-the status controls do not rely on a browser module resolver or an external Web
-asset.
+Root transport cannot overcome a powered-off device, a disconnected radio, or a
+manually disabled/uninstalled module. Validate lock-screen behavior on the target
+HyperOS device after every meaningful OS update.

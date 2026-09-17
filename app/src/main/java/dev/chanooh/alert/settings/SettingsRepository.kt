@@ -17,6 +17,7 @@ class SettingsRepository(private val context: Context) {
         val mqttBroker = stringPreferencesKey("mqtt_broker")
         val mqttUsername = stringPreferencesKey("mqtt_username")
         val mqttEnabled = booleanPreferencesKey("mqtt_enabled")
+        val transportMode = stringPreferencesKey("transport_mode")
         val deviceId = stringPreferencesKey("device_id")
         val criticalVolumePercent = intPreferencesKey("critical_volume_percent")
         val restoreVolumeAfterAck = booleanPreferencesKey("restore_volume_after_ack")
@@ -30,6 +31,9 @@ class SettingsRepository(private val context: Context) {
             mqttBroker = prefs[Keys.mqttBroker].orEmpty(),
             mqttUsername = prefs[Keys.mqttUsername].orEmpty(),
             mqttEnabled = prefs[Keys.mqttEnabled] ?: false,
+            transportMode = runCatching {
+                TransportMode.valueOf(prefs[Keys.transportMode].orEmpty())
+            }.getOrDefault(TransportMode.APP_FALLBACK),
             deviceId = prefs[Keys.deviceId].orEmpty(),
             criticalVolumePercent = prefs[Keys.criticalVolumePercent] ?: 100,
             restoreVolumeAfterAck = prefs[Keys.restoreVolumeAfterAck] ?: true,
@@ -44,6 +48,7 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.mqttBroker] = settings.mqttBroker.trim()
             prefs[Keys.mqttUsername] = settings.mqttUsername.trim()
             prefs[Keys.mqttEnabled] = settings.mqttEnabled
+            prefs[Keys.transportMode] = settings.transportMode.name
             prefs[Keys.deviceId] = settings.deviceId.trim()
             prefs[Keys.criticalVolumePercent] = settings.criticalVolumePercent.coerceIn(10, 100)
             prefs[Keys.restoreVolumeAfterAck] = settings.restoreVolumeAfterAck

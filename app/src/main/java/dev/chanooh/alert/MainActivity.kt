@@ -28,6 +28,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -59,29 +60,28 @@ import dev.chanooh.alert.alert.AlertHistoryItem
 import dev.chanooh.alert.alert.AlertHistoryStore
 import dev.chanooh.alert.alert.AlertLevel
 import dev.chanooh.alert.security.SecretStore
-import dev.chanooh.alert.push.MiPushBridge
 import dev.chanooh.alert.settings.AppSettings
 import dev.chanooh.alert.settings.SettingsRepository
+import dev.chanooh.alert.settings.TransportMode
 import dev.chanooh.alert.settings.redacted
 import dev.chanooh.alert.transport.MqttTransportService
+import dev.chanooh.alert.transport.RootTransportFiles
 import dev.chanooh.alert.ui.theme.AlertTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AlertHistoryStore.init(applicationContext)
-        MiPushBridge.registerAndSync(applicationContext)
-        MiPushBridge.handleIntent(applicationContext, intent)
         setContent { AlertTheme { AlertHome() } }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        MiPushBridge.handleIntent(applicationContext, intent)
     }
 }
 
@@ -96,12 +96,14 @@ private fun AlertHome() {
     val history by AlertHistoryStore.history.collectAsState()
     val scope = rememberCoroutineScope()
     var selectedTab by rememberSaveable { mutableStateOf(0) }
+    var rootStatus by remember { mutableStateOf(RootTransportFiles.status(context)) }
 
     var serverUrl by remember { mutableStateOf("") }
     var mqttBroker by remember { mutableStateOf("") }
     var mqttUsername by remember { mutableStateOf("") }
     var mqttPassword by remember { mutableStateOf("") }
     var mqttEnabled by remember { mutableStateOf(false) }
+    var transportMode by remember { mutableStateOf(TransportMode.APP_FALLBACK) }
     var deviceId by remember { mutableStateOf("") }
     var deviceApiToken by remember { mutableStateOf("") }
     var deviceHmacSecret by remember { mutableStateOf("") }
@@ -117,6 +119,7 @@ private fun AlertHome() {
             mqttBroker = persisted.mqttBroker
             mqttUsername = persisted.mqttUsername
             mqttEnabled = persisted.mqttEnabled
+            transportMode = persisted.transportMode
             deviceId = persisted.deviceId
             mqttPassword = secretStore.getMqttPassword()
             deviceApiToken = secretStore.getDeviceApiToken()
@@ -136,6 +139,13 @@ private fun AlertHome() {
     val notificationsAllowed = Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     val fullScreenAllowed = Build.VERSION.SDK_INT < 34 || notificationManager.canUseFullScreenIntent()
+    LaunchedEffect(selectedTab, persisted.transportMode) {
+        if (selectedTab != 1 || persisted.transportMode != TransportMode.KERNELSU_ROOT) return@LaunchedEffect
+        while (true) {
+            rootStatus = RootTransportFiles.status(context)
+            delay(5_000)
+        }
+    }
 
     Scaffold(topBar = { TopAppBar(title = { Text("告警") }) }) { padding ->
         Column(
@@ -178,7 +188,8 @@ private fun AlertHome() {
                         dndAccess = notificationManager.isNotificationPolicyAccessGranted,
                         notificationsAllowed = notificationsAllowed,
                         fullScreenAllowed = fullScreenAllowed,
-                        miPushStatus = MiPushBridge.status(context)
+                        transportMode = persisted.transportMode,
+                        rootStatus = rootStatus.display()
                     )
 
                     Card(modifier = Modifier.fillMaxWidth()) {
@@ -216,6 +227,23 @@ private fun AlertHome() {
                             Text("300 秒保活 · QoS 1 · 事件签名", style = MaterialTheme.typography.bodySmall)
                         }
                         Switch(checked = mqttEnabled, onCheckedChange = { mqttEnabled = it })
+                    }
+
+                    Text("传输运行方式", style = MaterialTheme.typography.titleSmall)
+                    TransportMode.entries.forEach { mode ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = transportMode == mode, onClick = { transportMode = mode })
+                            Column(Modifier.padding(start = 8.dp)) {
+                                Text(if (mode == TransportMode.KERNELSU_ROOT) "KernelSU 接管（推荐）" else "App MQTT 备用")
+                                Text(
+                                    if (mode == TransportMode.KERNELSU_ROOT)
+                                        "模块持有 MQTT；App 仅在收到签名事件时短暂唤醒。请先刷入 Guardian 0.4。"
+                                    else
+                                        "Android 前台服务持有 MQTT，适用于未安装模块或排障。",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
                     }
 
                     HorizontalDivider()
@@ -266,21 +294,25 @@ private fun AlertHome() {
                                 secretStore.setMqttPassword(mqttPassword)
                                 secretStore.setDeviceApiToken(deviceApiToken)
                                 secretStore.setDeviceHmacSecret(deviceHmacSecret)
-                                repository.save(
-                                    AppSettings(
-                                        serverBaseUrl = serverUrl,
-                                        mqttBroker = mqttBroker,
-                                        mqttUsername = mqttUsername,
-                                        mqttEnabled = mqttEnabled,
-                                        deviceId = deviceId,
-                                        criticalVolumePercent = volume.toInt(),
-                                        restoreVolumeAfterAck = restoreVolume,
-                                        rootDndOverrideEnabled = rootDndOverride,
-                                        silentModeEnabled = silentMode
-                                    )
+                                val saved = AppSettings(
+                                    serverBaseUrl = serverUrl,
+                                    mqttBroker = mqttBroker,
+                                    mqttUsername = mqttUsername,
+                                    mqttEnabled = mqttEnabled,
+                                    transportMode = transportMode,
+                                    deviceId = deviceId,
+                                    criticalVolumePercent = volume.toInt(),
+                                    restoreVolumeAfterAck = restoreVolume,
+                                    rootDndOverrideEnabled = rootDndOverride,
+                                    silentModeEnabled = silentMode
                                 )
-                                if (mqttEnabled) MqttTransportService.start(context) else MqttTransportService.stop(context)
-                                MiPushBridge.registerAndSync(context)
+                                repository.save(saved)
+                                RootTransportFiles.sync(context, saved, secretStore)
+                                if (mqttEnabled && transportMode == TransportMode.APP_FALLBACK) {
+                                    MqttTransportService.start(context)
+                                } else {
+                                    MqttTransportService.stop(context)
+                                }
                             }
                         }
                     ) { Text("保存并应用") }
@@ -465,7 +497,8 @@ private fun StatusCard(
     dndAccess: Boolean,
     notificationsAllowed: Boolean,
     fullScreenAllowed: Boolean,
-    miPushStatus: String
+    transportMode: TransportMode,
+    rootStatus: String
 ) {
     val armed = serverConfigured && mqttConfigured && dndAccess && notificationsAllowed && fullScreenAllowed
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -473,8 +506,10 @@ private fun StatusCard(
             Text("系统状态", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             StatusLine("服务器", serverConfigured)
             StatusLine("MQTT", mqttConfigured)
-            StatusLine("系统推送", miPushStatus == "已注册并同步")
-            Text("系统推送：$miPushStatus", style = MaterialTheme.typography.bodySmall)
+            Text(
+                if (transportMode == TransportMode.KERNELSU_ROOT) "传输：$rootStatus" else "传输：App MQTT 备用模式",
+                style = MaterialTheme.typography.bodySmall
+            )
             StatusLine("通知", notificationsAllowed)
             StatusLine("免打扰权限", dndAccess)
             StatusLine("全屏提醒", fullScreenAllowed)

@@ -1,7 +1,7 @@
 id=alert_guardian
 name=Alert Guardian
-version=0.3.0
-versionCode=4
+version=0.4.0
+versionCode=5
 author=chanooh
-summary=Low-power MQTT transport watchdog and status console for Alert
-description=Checks the enabled Alert MQTT transport every 5 minutes with recovery cooldown and provides a local status console.
+summary=Root-owned persistent MQTT transport and status console for Alert
+description=Runs a low-power native MQTT daemon outside HyperOS app freezing and wakes Alert only for signed events.

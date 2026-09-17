@@ -5,4 +5,4 @@
 echo "Alert Guardian"
 echo "Package: $PKG"
 
-exec "$MODDIR/status.sh" --recover
+exec "$MODDIR/status.sh"

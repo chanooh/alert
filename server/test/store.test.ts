@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -51,36 +51,25 @@ test("store persists pending state, retry metadata, and ACK", async () => {
   }
 });
 
-test("Mi Push fallback is level-aware, durable, and never replaces app ACK", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "alert-mipush-store-"));
+test("historical vendor-fallback fields are ignored without losing ACK state", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "alert-store-migration-"));
   const file = join(dir, "alerts.json");
   try {
     const createdAt = 1_700_000_000_000;
-    const urgent = signAlert(
-      { id: "evt-urgent", deviceId: "device-test", level: "urgent", title: "Urgent", message: "Fallback", createdAt },
+    const alert = signAlert(
+      { id: "evt-existing", deviceId: "device-test", level: "urgent", title: "Urgent", message: "Persisted", createdAt },
       "test-secret",
     );
-    const critical = signAlert(
-      { ...urgent, id: "evt-critical", level: "critical" },
-      "test-secret",
-    );
+    await writeFile(file, JSON.stringify([{
+      ...alert,
+      status: "pending", attempts: 2, lastSentAt: createdAt, ackedAt: null,
+      fallbackDueAt: createdAt, miPush: { status: "sent" },
+    }]));
     const store = new AlertStore(file);
     await store.init();
-    await store.add(urgent);
-    await store.add(critical);
-
-    assert.deepEqual(store.pendingForMiPush(createdAt).map((record) => record.id), ["evt-critical"]);
-    assert.deepEqual(store.pendingForMiPush(createdAt + 5_000).map((record) => record.id).sort(), ["evt-critical", "evt-urgent"]);
-
-    await store.markMiPushSending(urgent.id, createdAt + 5_000);
-    await store.markMiPushSent(urgent.id, "mi-provider-id");
-    await store.markMiPushDeliveredByProvider(urgent.id, createdAt + 6_000);
-    assert.equal(store.get(urgent.id)?.miPush.status, "delivered");
-    assert.equal(store.get(urgent.id)?.status, "pending");
-
-    await store.acknowledge(urgent.id, createdAt + 7_000);
-    assert.equal(store.get(urgent.id)?.status, "acked");
-    assert.equal(store.pendingForMiPush(createdAt + 60_000).some((record) => record.id === urgent.id), false);
+    assert.equal(store.get(alert.id)?.attempts, 2);
+    await store.acknowledge(alert.id, createdAt + 7_000);
+    assert.equal(store.get(alert.id)?.status, "acked");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

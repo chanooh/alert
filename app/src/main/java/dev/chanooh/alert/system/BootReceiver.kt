@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import dev.chanooh.alert.settings.SettingsRepository
+import dev.chanooh.alert.settings.TransportMode
 import dev.chanooh.alert.transport.MqttTransportService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,7 +20,7 @@ class BootReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 val settings = SettingsRepository(context.applicationContext).settings.first()
-                if (settings.mqttEnabled) {
+                if (settings.mqttEnabled && settings.transportMode == TransportMode.APP_FALLBACK) {
                     runCatching { MqttTransportService.start(context.applicationContext) }
                 }
             } finally {

@@ -54,18 +54,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Verify official Mi Push AAR when configured
-        env:
-          MIPUSH_SDK_SHA256: ${{ secrets.MIPUSH_SDK_SHA256 }}
-        run: |
-          if test -f app/libs/MiPush_SDK_Client.aar; then
-            test -n "$MIPUSH_SDK_SHA256"
-            echo "$MIPUSH_SDK_SHA256  app/libs/MiPush_SDK_Client.aar" | shasum -a 256 --check --status
-          fi
       - name: Run Android unit tests
-        env:
-          MIPUSH_APP_ID: ${{ secrets.MIPUSH_APP_ID }}
-          MIPUSH_APP_KEY: ${{ secrets.MIPUSH_APP_KEY }}
         run: |
           set +e
           set -o pipefail
@@ -90,8 +79,6 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          MIPUSH_APP_ID: ${{ secrets.MIPUSH_APP_ID }}
-          MIPUSH_APP_KEY: ${{ secrets.MIPUSH_APP_KEY }}
         run: gradle :app:assembleRelease --stacktrace
       - name: Upload signed release APK
         uses: actions/upload-artifact@v4
@@ -104,11 +91,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.24.0'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android NDK for 32-bit daemon build
+        run: sdkmanager --install "ndk;27.2.12479018"
+      - name: Test Root MQTT daemon source
+        working-directory: root/alert-guardian/daemon
+        run: go test ./...
+      - name: Cross-compile Root MQTT daemon
+        working-directory: root/alert-guardian/daemon
+        run: |
+          mkdir -p ../bin/arm64-v8a ../bin/armeabi-v7a
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o ../bin/arm64-v8a/alert-root-mqtt .
+          ANDROID_SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$ANDROID_SDK_DIR"
+          NDK="$ANDROID_SDK_DIR/ndk/27.2.12479018"
+          CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi28-clang" \
+            CGO_ENABLED=1 GOOS=android GOARCH=arm GOARM=7 \
+            go build -trimpath -ldflags='-s -w' -o ../bin/armeabi-v7a/alert-root-mqtt .
+          test -s ../bin/arm64-v8a/alert-root-mqtt
+          test -s ../bin/armeabi-v7a/alert-root-mqtt
       - name: Package KernelSU module
         run: |
           cd root/alert-guardian
-          chmod 0755 service.sh action.sh lib.sh status.sh restart.sh set-interval.sh
-          zip -r ../../alert-guardian-kernelsu.zip module.prop skip_mount service.sh action.sh lib.sh status.sh restart.sh set-interval.sh webroot README.md
+          chmod 0755 service.sh action.sh lib.sh status.sh restart.sh bin/arm64-v8a/alert-root-mqtt bin/armeabi-v7a/alert-root-mqtt
+          zip -r ../../alert-guardian-kernelsu.zip module.prop skip_mount service.sh action.sh lib.sh status.sh restart.sh webroot README.md bin
       - name: Upload KernelSU module
         uses: actions/upload-artifact@v4
         with:

@@ -17,18 +17,12 @@
 </head>
 <body>
   <h1>Alert Guardian</h1>
-  <p>MQTT 通道守护与恢复控制台。状态来自本机，不上传任何告警内容或密钥。</p>
+  <p>Root 常驻 MQTT 通道状态。状态来自本机，不上传任何告警内容或密钥。</p>
   <section>
     <strong>当前状态</strong>
     <pre id="status">正在读取…</pre>
     <button onclick="refreshStatus()">刷新状态</button>
-    <button class="warn" onclick="restartTransport()">立即重启 MQTT 通道</button>
-  </section>
-  <section>
-    <strong>巡检频率</strong>
-    <p class="hint">Guardian 只作为 MQTT 的低频恢复层；默认 5 分钟，自动恢复有 15 分钟冷却。</p>
-    <button class="secondary" onclick="setIntervalSeconds(300)">5 分钟（推荐）</button>
-    <button class="secondary" onclick="setIntervalSeconds(900)">15 分钟（省电）</button>
+    <button class="warn" onclick="restartTransport()">重启 Root MQTT 守护</button>
   </section>
   <p id="message" class="hint"></p>
   <script>
@@ -72,18 +66,7 @@
       try {
         message.textContent = await run(`sh ${root}/restart.sh`);
         message.className = 'hint';
-        setTimeout(window.refreshStatus, 1500);
-      } catch (error) {
-        message.textContent = error.message;
-        message.className = 'error';
-      }
-    };
-
-    window.setIntervalSeconds = async (seconds) => {
-      try {
-        message.textContent = await run(`sh ${root}/set-interval.sh ${seconds}`);
-        message.className = 'hint';
-        await window.refreshStatus();
+        setTimeout(window.refreshStatus, 2500);
       } catch (error) {
         message.textContent = error.message;
         message.className = 'error';

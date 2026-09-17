@@ -2,8 +2,7 @@
 
 . "${0%/*}/lib.sh"
 
-recover=${1:-}
-echo "Alert Guardian low-power watchdog"
+echo "Alert Guardian root MQTT transport"
 
 if ! pm path "$PKG" >/dev/null 2>&1; then
   echo "App: not installed"
@@ -11,42 +10,29 @@ if ! pm path "$PKG" >/dev/null 2>&1; then
 fi
 
 echo "App: installed"
-echo "Guardian marker: $([ -f "$MARKER" ] && echo enabled || echo disabled)"
-echo "Check interval: $(configured_interval)s"
-recovery_age=$(last_recovery_age_seconds || true)
-if [ -n "$recovery_age" ]; then
-  echo "Last recovery request: ${recovery_age}s ago"
+if daemon_running; then
+  echo "Root MQTT daemon: running"
 else
-  echo "Last recovery request: never"
+  echo "Root MQTT daemon: not running"
 fi
-
-if transport_running; then
-  echo "MQTT foreground service: running"
+if [ -f "$TRANSPORT_CONFIG" ]; then
+  echo "App Root configuration: present"
 else
-  echo "MQTT foreground service: missing"
+  echo "App Root configuration: not saved"
 fi
-
-age=$(heartbeat_age_seconds || true)
-if [ -n "$age" ]; then
-  echo "Last healthy MQTT heartbeat: ${age}s ago"
+if [ -f "$TRANSPORT_STATUS" ]; then
+  echo "Transport status:"
+  tr '{,}' '\n' < "$TRANSPORT_STATUS" | sed 's/^[[:space:]]*//; s/^"//; s/"$//'
 else
-  echo "Last healthy MQTT heartbeat: unavailable (install Alert 0.1.7+)"
+  echo "Transport status: waiting for daemon"
 fi
+count=$(find "$INBOX" -maxdepth 1 -type f -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+echo "Pending inbox files: ${count:-0}"
 
 if dumpsys deviceidle whitelist 2>/dev/null | grep -q "$PKG"; then
   echo "Doze whitelist: present"
 else
   echo "Doze whitelist: not detected"
-fi
-
-if [ "$recover" = "--recover" ] && [ -f "$MARKER" ]; then
-  if ! transport_running; then
-    recover_transport "manual action; service missing" manual
-  elif [ -n "$age" ] && [ "$age" -gt "$STALE_HEARTBEAT_SECONDS" ]; then
-    recover_transport "manual action; heartbeat stale (${age}s)" manual
-  else
-    echo "Recovery: not needed"
-  fi
 fi
 
 echo "Recent guardian log:"
