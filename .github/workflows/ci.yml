@@ -67,9 +67,11 @@ jobs:
           MIPUSH_APP_ID: ${{ secrets.MIPUSH_APP_ID }}
           MIPUSH_APP_KEY: ${{ secrets.MIPUSH_APP_KEY }}
         run: |
+          set +e
           set -o pipefail
           gradle :app:testDebugUnitTest --stacktrace 2>&1 | tee "$RUNNER_TEMP/android-unit-test.log"
           status=${PIPESTATUS[0]}
+          set -e
           if [ "$status" -ne 0 ]; then
             failure=$(grep -E '(^e: |FAILURE:|^\* What went wrong:| error:)' "$RUNNER_TEMP/android-unit-test.log" | tail -n 1 || true)
             echo "::error title=Android unit-test failure::${failure:-See the Gradle log for details}"
