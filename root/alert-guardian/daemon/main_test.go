@@ -53,6 +53,27 @@ func TestPendingInboxCountsOnlyDurableEvents(t *testing.T) {
 	}
 }
 
+func TestAtomicWriteForAppLeavesStatusReadable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "status.json")
+	if err := atomicWriteForApp(path, []byte(`{"state":"connecting"}`)); err != nil {
+		t.Fatalf("atomic write: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if string(got) != `{"state":"connecting"}` {
+		t.Fatalf("unexpected status: %s", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat status: %v", err)
+	}
+	if info.Mode().Perm()&0o004 == 0 {
+		t.Fatalf("status must be readable by Alert after Root writes it: %v", info.Mode())
+	}
+}
+
 func containsAny(value string, values ...string) bool {
 	for _, candidate := range values {
 		if candidate != "" && len(value) >= len(candidate) {

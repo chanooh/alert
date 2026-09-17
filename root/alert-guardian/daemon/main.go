@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -180,21 +179,16 @@ func (d *daemon) writeInbox(payload []byte) error {
 	if err := os.MkdirAll(inbox, 0o700); err != nil {
 		return err
 	}
-	owner, err := ownerOf(d.rootDir)
-	if err != nil {
-		return err
-	}
 	name, err := randomName()
 	if err != nil {
 		return err
 	}
 	temporary := filepath.Join(inbox, "."+name+".tmp")
 	final := filepath.Join(inbox, name+".json")
-	if err := os.WriteFile(temporary, payload, 0o600); err != nil {
-		return err
-	}
-	if err := os.Chown(temporary, owner.uid, owner.gid); err != nil {
-		_ = os.Remove(temporary)
+	// The file remains under Alert's private directory. KernelSU can create
+	// files there on HyperOS, but SELinux can reject chown even after creation.
+	// A readable leaf is safe because the app-data parent is still private.
+	if err := os.WriteFile(temporary, payload, 0o644); err != nil {
 		return err
 	}
 	if err := os.Rename(temporary, final); err != nil {
@@ -255,34 +249,14 @@ func (d *daemon) writeStatus(state string, cause error, connectedAt int64) {
 	}
 	encoded, _ := json.Marshal(value)
 	path := filepath.Join(d.rootDir, "status.json")
-	_ = atomicWriteOwned(path, encoded, d.rootDir)
+	if err := atomicWriteForApp(path, encoded); err != nil {
+		fmt.Fprintf(os.Stderr, "write root status: %v\n", err)
+	}
 }
 
-type fileOwner struct{ uid, gid int }
-
-func ownerOf(path string) (fileOwner, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fileOwner{}, err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return fileOwner{}, errors.New("cannot determine app directory owner")
-	}
-	return fileOwner{uid: int(stat.Uid), gid: int(stat.Gid)}, nil
-}
-
-func atomicWriteOwned(path string, content []byte, ownerPath string) error {
-	owner, err := ownerOf(ownerPath)
-	if err != nil {
-		return err
-	}
+func atomicWriteForApp(path string, content []byte) error {
 	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, content, 0o600); err != nil {
-		return err
-	}
-	if err := os.Chown(temporary, owner.uid, owner.gid); err != nil {
-		_ = os.Remove(temporary)
+	if err := os.WriteFile(temporary, content, 0o644); err != nil {
 		return err
 	}
 	if err := os.Rename(temporary, path); err != nil {
