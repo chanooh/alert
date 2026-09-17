@@ -26,10 +26,9 @@
   </section>
   <section>
     <strong>巡检频率</strong>
-    <p class="hint">更短的频率恢复更快，也会略增耗电。默认 60 秒。</p>
-    <button class="secondary" onclick="setIntervalSeconds(30)">30 秒</button>
-    <button class="secondary" onclick="setIntervalSeconds(60)">60 秒</button>
-    <button class="secondary" onclick="setIntervalSeconds(300)">5 分钟</button>
+    <p class="hint">Guardian 只作为 MQTT 的低频恢复层；默认 5 分钟，自动恢复有 15 分钟冷却。</p>
+    <button class="secondary" onclick="setIntervalSeconds(300)">5 分钟（推荐）</button>
+    <button class="secondary" onclick="setIntervalSeconds(900)">15 分钟（省电）</button>
   </section>
   <p id="message" class="hint"></p>
   <script>

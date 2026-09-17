@@ -9,8 +9,11 @@ HEARTBEAT="/data/user/0/dev.chanooh.alert/files/guardian_mqtt_heartbeat"
 LOG="$MODDIR/guardian.log"
 CONFIG_DIR="$MODDIR/config"
 INTERVAL_FILE="$CONFIG_DIR/interval_seconds"
-DEFAULT_INTERVAL_SECONDS=60
-STALE_HEARTBEAT_SECONDS=180
+RECOVERY_FILE="$CONFIG_DIR/last_recovery_epoch"
+DEFAULT_INTERVAL_SECONDS=300
+STALE_HEARTBEAT_SECONDS=600
+RECOVERY_COOLDOWN_SECONDS=900
+MANUAL_COOLDOWN_SECONDS=60
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"
@@ -20,9 +23,17 @@ log() {
 configured_interval() {
   value=$(cat "$INTERVAL_FILE" 2>/dev/null)
   case "$value" in
-    30|60|300) printf '%s\n' "$value" ;;
+    300|900) printf '%s\n' "$value" ;;
     *) printf '%s\n' "$DEFAULT_INTERVAL_SECONDS" ;;
   esac
+}
+
+last_recovery_age_seconds() {
+  [ -f "$RECOVERY_FILE" ] || return 1
+  now=$(date +%s 2>/dev/null) || return 1
+  then=$(cat "$RECOVERY_FILE" 2>/dev/null) || return 1
+  case "$then" in *[!0-9]*|'') return 1 ;; esac
+  printf '%s\n' $((now - then))
 }
 
 apply_best_effort_policy() {
@@ -53,7 +64,18 @@ start_transport() {
 
 recover_transport() {
   reason=$1
+  manual=$2
+  cooldown=$RECOVERY_COOLDOWN_SECONDS
+  [ "$manual" = "manual" ] && cooldown=$MANUAL_COOLDOWN_SECONDS
+  age=$(last_recovery_age_seconds || true)
+  if [ -n "$age" ] && [ "$age" -lt "$cooldown" ]; then
+    log "transport recovery skipped: cooldown (${age}s < ${cooldown}s); $reason"
+    return 2
+  fi
   if start_transport; then
+    umask 077
+    mkdir -p "$CONFIG_DIR"
+    date +%s > "$RECOVERY_FILE"
     log "transport restart requested: $reason"
     return 0
   fi

@@ -8,5 +8,13 @@ if [ ! -f "$MARKER" ]; then
   exit 1
 fi
 
-recover_transport "manual WebUI request"
-echo "Restart request sent. Refresh status in a few seconds."
+if recover_transport "manual WebUI request" manual; then
+  echo "Restart request sent. Refresh status in a few seconds."
+else
+  code=$?
+  if [ "$code" -eq 2 ]; then
+    echo "Recent restart request is still in its cooldown. Refresh status shortly."
+    exit 0
+  fi
+  exit "$code"
+fi

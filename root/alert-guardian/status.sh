@@ -3,7 +3,7 @@
 . "${0%/*}/lib.sh"
 
 recover=${1:-}
-echo "Alert Guardian ${DEFAULT_INTERVAL_SECONDS}s watchdog"
+echo "Alert Guardian low-power watchdog"
 
 if ! pm path "$PKG" >/dev/null 2>&1; then
   echo "App: not installed"
@@ -13,6 +13,12 @@ fi
 echo "App: installed"
 echo "Guardian marker: $([ -f "$MARKER" ] && echo enabled || echo disabled)"
 echo "Check interval: $(configured_interval)s"
+recovery_age=$(last_recovery_age_seconds || true)
+if [ -n "$recovery_age" ]; then
+  echo "Last recovery request: ${recovery_age}s ago"
+else
+  echo "Last recovery request: never"
+fi
 
 if transport_running; then
   echo "MQTT foreground service: running"
@@ -35,9 +41,9 @@ fi
 
 if [ "$recover" = "--recover" ] && [ -f "$MARKER" ]; then
   if ! transport_running; then
-    recover_transport "manual action; service missing"
+    recover_transport "manual action; service missing" manual
   elif [ -n "$age" ] && [ "$age" -gt "$STALE_HEARTBEAT_SECONDS" ]; then
-    recover_transport "manual action; heartbeat stale (${age}s)"
+    recover_transport "manual action; heartbeat stale (${age}s)" manual
   else
     echo "Recovery: not needed"
   fi

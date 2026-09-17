@@ -8,7 +8,8 @@ Private Android alert terminal for high-priority personal events. The app is nat
 - PR #1 (`Initial native Android alert app`) is merged into `main`.
 - Follow-up reliability, transport, testing, and device-acceptance work is reviewed from `feature/initial-alert-app` in PR #2.
 - GitHub Actions is the build/test source of truth. Reviewers do not need a local Android or Node build to verify the branch.
-- Xiaomi Push and FCM are **not** implemented yet; they remain future redundant transports and require their official credentials/dependencies.
+- Alert 0.2 adds an optional Mi Push notification-bar fallback for Xiaomi /
+  HyperOS lock-screen delivery. MQTT remains the primary low-latency transport.
 
 ## End-to-end flow
 
@@ -37,6 +38,13 @@ Alert dispatcher
     |-- warning  -> notification + vibration -> automatic durable ACK
     |-- urgent   -> dedicated foreground alert service -> automatic durable ACK
     `-- critical -> full-screen alarm path -> explicit user ACK -> signed MQTT ACK
+
+If MQTT has not been ACKed in time, the server sends a single Mi Push
+notification-bar fallback to the device's registered Mi Push RegID: immediately
+for Critical, after 5 seconds for Urgent, and after 30 seconds for Warning/Info.
+The system notification is intentionally not a pass-through message: Xiaomi
+does not guarantee pass-through delivery while the app is not running. Provider
+delivery receipts are recorded separately and never replace the app's ACK.
 ```
 
 Automatic ACKs travel back on the already-established MQTT connection and are
@@ -88,15 +96,31 @@ used by the optional KernelSU Guardian.
 ## Root / KernelSU reliability
 
 `root/alert-guardian` is optional. It does not carry alert traffic itself. Its
-late-start `service.sh` checks every 60 seconds by default and, only when the
+late-start `service.sh` checks every 5 minutes by default and, only when the
 app previously enabled MQTT, requests a restart if Android no longer lists the
 MQTT foreground service. With App 0.1.7+, the Guardian also watches a private
 MQTT-health heartbeat so it can recover a stale transport that still appears as
 running. It also applies a small set of best-effort background/Doze allowances.
 
 The Guardian's KernelSU WebUI shows the local service/heartbeat/Doze state and
-recent Guardian log, and offers a manual restart plus fixed 30/60/300-second
-check intervals. It exposes neither alert content nor any transport secret.
+recent Guardian log, and offers a manual restart plus fixed 5/15-minute check
+intervals. Automatic recovery is limited to one request per 15 minutes; it
+exposes neither alert content nor any transport secret.
+
+## Mi Push fallback setup
+
+Create the mainland-China `dev.chanooh.alert` application in Xiaomi Push,
+download its official client AAR, and place it at
+`app/libs/MiPush_SDK_Client.aar`. Store the AAR SHA-256 in GitHub secret
+`MIPUSH_SDK_SHA256`; store the client `MIPUSH_APP_ID` and `MIPUSH_APP_KEY` as
+GitHub secrets for the signed APK build. Do **not** place `AppSecret` in GitHub
+or Android: set it only in the server `.env` together with a random
+`MIPUSH_CALLBACK_TOKEN` and a public callback URL such as
+`http://YOUR_SERVER:8787/api/mipush/receipts/YOUR_RANDOM_TOKEN`.
+
+After installing the signed APK and saving the existing server/device fields,
+open Alert once. The app registers its Mi Push RegID and uploads it through the
+existing device bearer token. The settings page then shows `已注册并同步`.
 
 ### Root DND override
 

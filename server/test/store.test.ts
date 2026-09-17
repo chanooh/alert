@@ -50,3 +50,38 @@ test("store persists pending state, retry metadata, and ACK", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("Mi Push fallback is level-aware, durable, and never replaces app ACK", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "alert-mipush-store-"));
+  const file = join(dir, "alerts.json");
+  try {
+    const createdAt = 1_700_000_000_000;
+    const urgent = signAlert(
+      { id: "evt-urgent", deviceId: "device-test", level: "urgent", title: "Urgent", message: "Fallback", createdAt },
+      "test-secret",
+    );
+    const critical = signAlert(
+      { ...urgent, id: "evt-critical", level: "critical" },
+      "test-secret",
+    );
+    const store = new AlertStore(file);
+    await store.init();
+    await store.add(urgent);
+    await store.add(critical);
+
+    assert.deepEqual(store.pendingForMiPush(createdAt).map((record) => record.id), ["evt-critical"]);
+    assert.deepEqual(store.pendingForMiPush(createdAt + 5_000).map((record) => record.id).sort(), ["evt-critical", "evt-urgent"]);
+
+    await store.markMiPushSending(urgent.id, createdAt + 5_000);
+    await store.markMiPushSent(urgent.id, "mi-provider-id");
+    await store.markMiPushDeliveredByProvider(urgent.id, createdAt + 6_000);
+    assert.equal(store.get(urgent.id)?.miPush.status, "delivered");
+    assert.equal(store.get(urgent.id)?.status, "pending");
+
+    await store.acknowledge(urgent.id, createdAt + 7_000);
+    assert.equal(store.get(urgent.id)?.status, "acked");
+    assert.equal(store.pendingForMiPush(createdAt + 60_000).some((record) => record.id === urgent.id), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

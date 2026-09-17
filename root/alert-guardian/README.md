@@ -5,10 +5,11 @@ Optional reliability layer for the Android Alert app.
 ## What it does
 
 - Runs as a KernelSU `service.sh` late-start module.
-- Checks every **60 seconds** by default; WebUI can switch to 30 seconds or 5 minutes.
+- Checks every **5 minutes** by default; WebUI can switch to 15 minutes for
+  lower idle power use. Automatic recovery has a 15-minute cooldown.
 - Does nothing unless the Android app previously enabled its self-hosted MQTT transport and left the private guardian marker.
 - If the MQTT foreground service is missing, explicitly requests Android to start that service again.
-- With Alert **0.1.7+**, also checks a private MQTT-health heartbeat. A stale
+- With Alert **0.2.0+**, also checks a private MQTT-health heartbeat. A stale
   heartbeat triggers a safe foreground-service restart even when Android still
   lists the service as running.
 - Applies a small set of best-effort AOSP background/Doze app-op allowances. Unsupported app-ops are ignored.
@@ -24,10 +25,11 @@ Modern Android intentionally keeps a package in `FLAG_STOPPED` after a user forc
 
 ## Power model
 
-The default 60-second guardian interval is aimed at notification reliability. It
-does not maintain its own network connection and normally performs only a quick
-service/heartbeat check before sleeping again. Use the WebUI to select 5 minutes
-if battery life is more important, or 30 seconds for the fastest recovery.
+The default 5-minute guardian interval is a recovery layer, not the primary
+reliability mechanism. It reads only the private heartbeat during its normal
+loop and avoids expensive service dumps; use 15 minutes when battery life is
+more important. MQTT remains the immediate path and Mi Push is the system-level
+fallback for a frozen HyperOS process.
 
 The actual realtime transport remains MQTT in the Android foreground service with a 300-second MQTT keepalive. If you do not want the root fallback, simply do not install this module.
 
@@ -50,8 +52,8 @@ Open **WebUI** on the Alert Guardian module card in KernelSU Manager. It reports
 - the age of the private MQTT health heartbeat (Alert 0.1.7+);
 - Doze whitelist detection and recent Guardian log entries.
 
-The only controls are an explicit MQTT transport restart and three fixed
-check intervals (30, 60, or 300 seconds). The WebUI does not expose an arbitrary
+The only controls are an explicit MQTT transport restart and two fixed
+check intervals (300 or 900 seconds). The WebUI does not expose an arbitrary
 root shell, network endpoint, device token, or alert contents.
 
 Use a current KernelSU Manager build with module WebUI support; on older Manager

@@ -3,7 +3,7 @@
 . "${0%/*}/lib.sh"
 
 case "$1" in
-  30|60|300)
+  300|900)
     umask 077
     mkdir -p "$CONFIG_DIR"
     printf '%s\n' "$1" > "$INTERVAL_FILE"

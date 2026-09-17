@@ -54,7 +54,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+      - name: Verify official Mi Push AAR when configured
+        env:
+          MIPUSH_SDK_SHA256: ${{ secrets.MIPUSH_SDK_SHA256 }}
+        run: |
+          if test -f app/libs/MiPush_SDK_Client.aar; then
+            test -n "$MIPUSH_SDK_SHA256"
+            echo "$MIPUSH_SDK_SHA256  app/libs/MiPush_SDK_Client.aar" | shasum -a 256 --check --status
+          fi
       - name: Run Android unit tests
+        env:
+          MIPUSH_APP_ID: ${{ secrets.MIPUSH_APP_ID }}
+          MIPUSH_APP_KEY: ${{ secrets.MIPUSH_APP_KEY }}
         run: gradle :app:testDebugUnitTest --stacktrace
       - name: Prepare release signing
         env:
@@ -69,6 +80,8 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          MIPUSH_APP_ID: ${{ secrets.MIPUSH_APP_ID }}
+          MIPUSH_APP_KEY: ${{ secrets.MIPUSH_APP_KEY }}
         run: gradle :app:assembleRelease --stacktrace
       - name: Upload signed release APK
         uses: actions/upload-artifact@v4

@@ -59,6 +59,7 @@ import dev.chanooh.alert.alert.AlertHistoryItem
 import dev.chanooh.alert.alert.AlertHistoryStore
 import dev.chanooh.alert.alert.AlertLevel
 import dev.chanooh.alert.security.SecretStore
+import dev.chanooh.alert.push.MiPushBridge
 import dev.chanooh.alert.settings.AppSettings
 import dev.chanooh.alert.settings.SettingsRepository
 import dev.chanooh.alert.settings.redacted
@@ -73,7 +74,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AlertHistoryStore.init(applicationContext)
+        MiPushBridge.registerAndSync(applicationContext)
+        MiPushBridge.handleIntent(applicationContext, intent)
         setContent { AlertTheme { AlertHome() } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        MiPushBridge.handleIntent(applicationContext, intent)
     }
 }
 
@@ -169,7 +177,8 @@ private fun AlertHome() {
                         mqttConfigured = persisted.mqttBroker.isNotBlank() && persisted.deviceId.isNotBlank(),
                         dndAccess = notificationManager.isNotificationPolicyAccessGranted,
                         notificationsAllowed = notificationsAllowed,
-                        fullScreenAllowed = fullScreenAllowed
+                        fullScreenAllowed = fullScreenAllowed,
+                        miPushStatus = MiPushBridge.status(context)
                     )
 
                     Card(modifier = Modifier.fillMaxWidth()) {
@@ -271,6 +280,7 @@ private fun AlertHome() {
                                     )
                                 )
                                 if (mqttEnabled) MqttTransportService.start(context) else MqttTransportService.stop(context)
+                                MiPushBridge.registerAndSync(context)
                             }
                         }
                     ) { Text("保存并应用") }
@@ -454,7 +464,8 @@ private fun StatusCard(
     mqttConfigured: Boolean,
     dndAccess: Boolean,
     notificationsAllowed: Boolean,
-    fullScreenAllowed: Boolean
+    fullScreenAllowed: Boolean,
+    miPushStatus: String
 ) {
     val armed = serverConfigured && mqttConfigured && dndAccess && notificationsAllowed && fullScreenAllowed
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -462,6 +473,8 @@ private fun StatusCard(
             Text("系统状态", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             StatusLine("服务器", serverConfigured)
             StatusLine("MQTT", mqttConfigured)
+            StatusLine("系统推送", miPushStatus == "已注册并同步")
+            Text("系统推送：$miPushStatus", style = MaterialTheme.typography.bodySmall)
             StatusLine("通知", notificationsAllowed)
             StatusLine("免打扰权限", dndAccess)
             StatusLine("全屏提醒", fullScreenAllowed)

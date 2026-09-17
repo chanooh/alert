@@ -6,6 +6,10 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.IBinder
 import com.hivemq.client.mqtt.MqttClient
 import com.hivemq.client.mqtt.datatypes.MqttQos
@@ -34,10 +38,14 @@ class MqttTransportService : Service() {
     private var client: Mqtt5AsyncClient? = null
     private var connectJob: Job? = null
     private var heartbeatJob: Job? = null
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile private var transportReady = false
 
     override fun onCreate() {
         super.onCreate()
         createChannel()
+        observeNetworkAvailability()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -53,9 +61,15 @@ class MqttTransportService : Service() {
                 }
             }
             else -> {
-                startForeground(NOTIFICATION_ID, buildNotification("Connecting…"))
-                connectJob?.cancel()
-                connectJob = scope.launch { connectSafely() }
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildNotification(if (transportReady) "MQTT 已连接" else "正在连接 MQTT…")
+                )
+                // Guardian and boot may both issue START. A healthy subscription must
+                // be reused instead of deliberately disconnecting it every time.
+                if (!transportReady && connectJob?.isActive != true) {
+                    connectJob = scope.launch { connectSafely() }
+                }
             }
         }
         return START_STICKY
@@ -141,6 +155,9 @@ class MqttTransportService : Service() {
         val port = if (uri.port > 0) uri.port else if (secure) 8883 else 1883
         val topic = "alert/${settings.deviceId}/events"
 
+        transportReady = false
+        heartbeatJob?.cancel()
+        heartbeatJob = null
         runCatching { client?.disconnect()?.get(3, TimeUnit.SECONDS) }
         client = null
 
@@ -149,7 +166,6 @@ class MqttTransportService : Service() {
             .identifier("alert-${settings.deviceId}")
             .serverHost(host)
             .serverPort(port)
-            .automaticReconnectWithDefaultConfig()
             .addConnectedListener {
                 GuardianMarker.setEnabled(applicationContext, true)
                 updateNotification("MQTT 已连接，正在订阅…")
@@ -167,7 +183,9 @@ class MqttTransportService : Service() {
                     .send()
                     .whenComplete { _, error ->
                         if (error != null) {
+                            transportReady = false
                             updateNotification("MQTT 已连接，订阅失败，正在重试")
+                            scheduleReconnect()
                         } else {
                             startHeartbeat()
                             updateNotification("MQTT 已连接")
@@ -175,15 +193,11 @@ class MqttTransportService : Service() {
                     }
             }
             .addDisconnectedListener {
+                transportReady = false
                 heartbeatJob?.cancel()
                 heartbeatJob = null
                 updateNotification("MQTT reconnecting")
-                if (connectJob?.isActive != true) {
-                    connectJob = scope.launch {
-                        delay(RECONNECT_DELAY_MS)
-                        connectSafely()
-                    }
-                }
+                scheduleReconnect()
             }
 
         if (secure) builder.sslWithDefaultConfig()
@@ -208,6 +222,7 @@ class MqttTransportService : Service() {
 
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
+        transportReady = true
         GuardianMarker.recordHealthyTransport(applicationContext)
         heartbeatJob = scope.launch {
             while (currentCoroutineContext().isActive) {
@@ -222,6 +237,7 @@ class MqttTransportService : Service() {
         connectJob = null
         heartbeatJob?.cancel()
         heartbeatJob = null
+        transportReady = false
         runCatching { client?.disconnect() }
         client = null
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -233,8 +249,11 @@ class MqttTransportService : Service() {
         connectJob = null
         heartbeatJob?.cancel()
         heartbeatJob = null
+        transportReady = false
         runCatching { client?.disconnect() }
         client = null
+        networkCallback?.let { callback -> runCatching { connectivityManager?.unregisterNetworkCallback(callback) } }
+        networkCallback = null
         scope.cancel()
         super.onDestroy()
     }
@@ -249,7 +268,7 @@ class MqttTransportService : Service() {
         private const val CHANNEL_ID = "transport_status"
         private const val NOTIFICATION_ID = 8001
         private const val RECONNECT_DELAY_MS = 30_000L
-        private const val HEARTBEAT_INTERVAL_MS = 60_000L
+        private const val HEARTBEAT_INTERVAL_MS = 300_000L
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, MqttTransportService::class.java).apply {
@@ -269,6 +288,36 @@ class MqttTransportService : Service() {
                 action = ACTION_ACK
                 putExtra(EXTRA_EVENT_ID, eventId)
             })
+        }
+    }
+
+    private fun scheduleReconnect(delayMillis: Long = RECONNECT_DELAY_MS) {
+        if (connectJob?.isActive == true) return
+        connectJob = scope.launch {
+            delay(delayMillis)
+            connectSafely()
+        }
+    }
+
+    private fun observeNetworkAvailability() {
+        connectivityManager = getSystemService(ConnectivityManager::class.java)
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                if (!transportReady) scheduleReconnect(delayMillis = 0)
+            }
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) && !transportReady) {
+                    scheduleReconnect(delayMillis = 0)
+                }
+            }
+        }
+        networkCallback = callback
+        runCatching {
+            connectivityManager?.registerNetworkCallback(
+                NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),
+                callback
+            )
         }
     }
 }

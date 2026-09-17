@@ -65,5 +65,13 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".push.MiPushMessageReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.xiaomi.mipush.RECEIVE_MESSAGE" />
+            </intent-filter>
+        </receiver>
+
     </application>
 </manifest>
