@@ -54,15 +54,9 @@ object RootTransportFiles {
     internal fun rootConfigJson(settings: AppSettings, mqttPassword: String, generation: Long): String {
         val enabled = settings.mqttEnabled && settings.transportMode == TransportMode.KERNELSU_ROOT &&
             settings.mqttBroker.isNotBlank() && settings.deviceId.isNotBlank()
-        return JSONObject()
-            .put("schema", SCHEMA)
-            .put("enabled", enabled)
-            .put("generation", generation)
-            .put("broker", if (enabled) settings.mqttBroker.trim() else "")
-            .put("username", if (enabled) settings.mqttUsername.trim() else "")
-            .put("password", if (enabled) mqttPassword else "")
-            .put("deviceId", if (enabled) settings.deviceId.trim() else "")
-            .toString()
+        // Keep this serializer JVM-testable: Android's platform JSONObject is
+        // a throwing stub in local unit tests. Every dynamic field is escaped.
+        return """{"schema":$SCHEMA,"enabled":$enabled,"generation":$generation,"broker":${quote(if (enabled) settings.mqttBroker.trim() else "")},"username":${quote(if (enabled) settings.mqttUsername.trim() else "")},"password":${quote(if (enabled) mqttPassword else "")},"deviceId":${quote(if (enabled) settings.deviceId.trim() else "")}}"""
     }
 
     fun status(context: Context): Status {
@@ -97,5 +91,20 @@ object RootTransportFiles {
         }.getOrElse {
             temporary.renameTo(target)
         }
+    }
+
+    private fun quote(value: String): String = buildString {
+        append('"')
+        value.forEach { character ->
+            when (character) {
+                '\\' -> append("\\\\")
+                '"' -> append("\\\"")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> if (character.code < 0x20) append("\\u%04x".format(character.code)) else append(character)
+            }
+        }
+        append('"')
     }
 }
