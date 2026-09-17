@@ -28,7 +28,17 @@ daemon_binary() {
   case "$abi" in
     arm64-v8a|aarch64) printf '%s\n' "$MODDIR/bin/arm64-v8a/alert-root-mqtt" ;;
     armeabi-v7a|armeabi) printf '%s\n' "$MODDIR/bin/armeabi-v7a/alert-root-mqtt" ;;
-    *) return 1 ;;
+    # Some HyperOS builds expose a vendor ABI string even on a standard arm64
+    # phone. Prefer the shipped arm64 daemon before declaring it unsupported.
+    *)
+      if [ -f "$MODDIR/bin/arm64-v8a/alert-root-mqtt" ]; then
+        printf '%s\n' "$MODDIR/bin/arm64-v8a/alert-root-mqtt"
+      elif [ -f "$MODDIR/bin/armeabi-v7a/alert-root-mqtt" ]; then
+        printf '%s\n' "$MODDIR/bin/armeabi-v7a/alert-root-mqtt"
+      else
+        return 1
+      fi
+      ;;
   esac
 }
 
@@ -39,7 +49,11 @@ daemon_running() {
   kill -0 "$pid" 2>/dev/null
 }
 
+start_transport() {
   binary=$(daemon_binary) || return 1
+  # Some KernelSU managers preserve nested ZIP contents but not their Unix
+  # executable bit. Root restores it before launching the native daemon.
+  chmod 0755 "$binary" 2>/dev/null || true
   [ -x "$binary" ] || return 1
   "$binary" "$APP_FILES" >> "$LOG" 2>&1 &
   pid=$!

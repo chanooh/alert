@@ -10,6 +10,14 @@ if ! pm path "$PKG" >/dev/null 2>&1; then
 fi
 
 echo "App: installed"
+echo "Device ABI: $(getprop ro.product.cpu.abi 2>/dev/null || echo unknown)"
+binary=$(daemon_binary || true)
+if [ -n "$binary" ]; then
+  echo "Selected daemon binary: $binary"
+  echo "Daemon binary file: $([ -f "$binary" ] && echo present || echo missing), executable: $([ -x "$binary" ] && echo yes || echo no)"
+else
+  echo "Selected daemon binary: none"
+fi
 if daemon_running; then
   echo "Root MQTT daemon: running"
 else
