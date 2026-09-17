@@ -12,6 +12,7 @@ val hasReleaseSigning = listOf(
 ).all { !it.isNullOrBlank() }
 val miPushAppId = System.getenv("MIPUSH_APP_ID")?.trim().orEmpty()
 val miPushAppKey = System.getenv("MIPUSH_APP_KEY")?.trim().orEmpty()
+val miPushAar = file("libs/MiPush_SDK_Client.aar")
 
 plugins {
     id("com.android.application")
@@ -53,7 +54,7 @@ android {
         compose = true
         buildConfig = true
     }
-    if (file("libs/MiPush_SDK_Client.aar").isFile) {
+    if (miPushAar.isFile) {
         sourceSets.getByName("main").java.srcDir("src/mipush/java")
     }
     compileOptions {
@@ -72,7 +73,7 @@ dependencies {
     // Official mainland Mi Push AAR, intentionally supplied by the owner from
     // Xiaomi's developer portal. The dedicated SDK receiver source set is
     // included only when this official AAR is present.
-    implementation(files("libs/MiPush_SDK_Client.aar"))
+    if (miPushAar.isFile) implementation(files(miPushAar))
     implementation(platform("androidx.compose:compose-bom:2025.12.00"))
     implementation("androidx.activity:activity-compose:1.12.0")
     implementation("androidx.compose.ui:ui")
