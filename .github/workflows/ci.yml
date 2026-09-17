@@ -73,7 +73,7 @@ jobs:
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
-            failure=$(grep -E '(^e: |FAILURE:|^\* What went wrong:| error:)' "$RUNNER_TEMP/android-unit-test.log" | tail -n 1 || true)
+            failure=$(awk '/^\* What went wrong:/{capture=1; next} capture && NF {print; exit} /^e: | error:/{print; exit}' "$RUNNER_TEMP/android-unit-test.log" || true)
             echo "::error title=Android unit-test failure::${failure:-See the Gradle log for details}"
             exit "$status"
           fi
