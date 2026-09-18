@@ -19,6 +19,7 @@ object RootTransportFiles {
     private const val CONFIG_FILE = "config.json"
     private const val STATUS_FILE = "status.json"
     private const val INBOX_DIRECTORY = "inbox"
+    private const val REJECTED_DIRECTORY = "rejected"
     private const val SCHEMA = 1
 
     data class Status(
@@ -27,10 +28,12 @@ object RootTransportFiles {
         val lastConnectedAt: Long = 0,
         val lastEventAt: Long = 0,
         val pendingInbox: Int = 0,
+        val rejectedInbox: Int = 0,
         val lastError: String = ""
     ) {
         fun display(): String = when (state) {
-            "subscribed" -> "Root MQTT 已订阅"
+            "subscribed" -> if (rejectedInbox == 0) "Root MQTT 已订阅"
+            else "Root MQTT 已订阅；有 $rejectedInbox 条验签拒绝事件"
             "connecting" -> "Root MQTT 正在连接"
             "backoff" -> if (lastError.isBlank()) "Root MQTT 正在重连" else "Root MQTT 重连：$lastError"
             "disabled" -> "Root MQTT 已关闭"
@@ -42,6 +45,7 @@ object RootTransportFiles {
     private fun config(context: Context) = File(directory(context), CONFIG_FILE)
     private fun statusFile(context: Context) = File(directory(context), STATUS_FILE)
     fun inbox(context: Context) = File(directory(context), INBOX_DIRECTORY)
+    private fun rejected(context: Context) = File(directory(context), REJECTED_DIRECTORY)
 
     fun sync(context: Context, settings: AppSettings, secrets: SecretStore) {
         val target = config(context)
@@ -67,6 +71,7 @@ object RootTransportFiles {
             lastConnectedAt = json.optLong("lastConnectedAt", 0),
             lastEventAt = json.optLong("lastEventAt", 0),
             pendingInbox = json.optInt("pendingInbox", 0).coerceAtLeast(0),
+            rejectedInbox = json.optInt("rejectedInbox", 0).coerceAtLeast(0),
             lastError = json.optString("lastError", "").take(120)
         )
     }
@@ -78,6 +83,27 @@ object RootTransportFiles {
 
     fun deleteInboxEntry(file: File) {
         runCatching { file.delete() }
+    }
+
+    /**
+     * Preserve one copy of a rejected signed payload for local/root diagnosis.
+     * It is removed from the active inbox so an invalid publisher cannot create
+     * an endless wake loop, but it is no longer silently lost.
+     */
+    fun quarantineRejectedInboxEntry(context: Context, file: File, eventId: String) {
+        val safeId = eventId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+            .ifBlank { file.nameWithoutExtension }
+        val targetDirectory = rejected(context).apply { mkdirs() }
+        val target = File(targetDirectory, "$safeId.json")
+        if (target.exists()) {
+            runCatching { file.delete() }
+            return
+        }
+        runCatching {
+            Files.move(file.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        }.getOrElse {
+            runCatching { file.renameTo(target) }
+        }
     }
 
     private fun atomicWrite(target: File, bytes: ByteArray) {

@@ -24,13 +24,31 @@ class AlertVerifierTest {
     }
 
     @Test
-    fun rejectsStaleEvent() {
+    fun acceptsValidEventDelayedWithinServerRetryWindow() {
+        val now = System.currentTimeMillis()
         val event = signedEvent(
             deviceId = "device-test",
             secret = "test-secret",
-            createdAt = System.currentTimeMillis() - 16 * 60 * 1000L
+            createdAt = now - 23 * 60 * 60 * 1000L
         )
-        assertFalse(AlertVerifier.verify(event, "device-test", "test-secret"))
+        assertTrue(AlertVerifier.verify(event, "device-test", "test-secret", now))
+    }
+
+    @Test
+    fun rejectsExpiredOrFarFutureEvent() {
+        val now = System.currentTimeMillis()
+        val expired = signedEvent(
+            deviceId = "device-test",
+            secret = "test-secret",
+            createdAt = now - 24 * 60 * 60 * 1000L - 1
+        )
+        val future = signedEvent(
+            deviceId = "device-test",
+            secret = "test-secret",
+            createdAt = now + 5 * 60 * 1000L + 1
+        )
+        assertFalse(AlertVerifier.verify(expired, "device-test", "test-secret", now))
+        assertFalse(AlertVerifier.verify(future, "device-test", "test-secret", now))
     }
 
     private fun signedEvent(

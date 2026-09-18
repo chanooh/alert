@@ -20,10 +20,12 @@ import (
 )
 
 const (
-	packageName   = "dev.chanooh.alert"
-	componentName = "dev.chanooh.alert/.transport.RootIngressService"
-	ingressAction = "dev.chanooh.alert.action.ROOT_DRAIN"
-	keepAlive     = 300 * time.Second
+	packageName       = "dev.chanooh.alert"
+	componentName     = "dev.chanooh.alert/.transport.RootIngressService"
+	ingressAction     = "dev.chanooh.alert.action.ROOT_DRAIN"
+	keepAlive         = 300 * time.Second
+	ingressDrainGrace = 5 * time.Second
+	ingressDrainPoll  = 250 * time.Millisecond
 )
 
 type config struct {
@@ -43,6 +45,7 @@ type status struct {
 	LastConnectedAt int64  `json:"lastConnectedAt,omitempty"`
 	LastEventAt     int64  `json:"lastEventAt,omitempty"`
 	PendingInbox    int    `json:"pendingInbox"`
+	RejectedInbox   int    `json:"rejectedInbox"`
 	LastError       string `json:"lastError,omitempty"`
 }
 
@@ -96,8 +99,11 @@ func (d *daemon) runClient(cfg config) error {
 		SetCleanSession(false).
 		SetKeepAlive(keepAlive).
 		SetAutoReconnect(true).
-		SetConnectRetry(true).
-		SetConnectRetryInterval(5 * time.Second).
+		// Initial connections are driven by the outer state machine instead of
+		// Paho's unbounded ConnectRetry. A configuration or TLS failure must be
+		// surfaced as a backoff error instead of looking "connecting" forever.
+		SetConnectRetry(false).
+		SetConnectTimeout(10 * time.Second).
 		SetOrderMatters(false)
 	if cfg.Username != "" {
 		options.SetUsername(cfg.Username).SetPassword(cfg.Password)
@@ -213,12 +219,18 @@ func (d *daemon) ensureWakeLoop() {
 			d.mu.Unlock()
 		}()
 		for {
-			if pendingInbox(filepath.Join(d.rootDir, "inbox")) == 0 {
+			inbox := filepath.Join(d.rootDir, "inbox")
+			if pendingInbox(inbox) == 0 {
 				d.writeStatus("subscribed", nil, 0)
 				return
 			}
 			if err := wakeIngress(); err != nil {
 				d.writeStatus("subscribed", err, 0)
+			} else if waitForInboxDrain(inbox, ingressDrainGrace) {
+				// The App drained durable work. Refresh immediately rather than
+				// leaving WebUI's pending count stale for a full retry minute.
+				d.writeStatus("subscribed", nil, 0)
+				return
 			}
 			time.Sleep(time.Minute) // only while durable work remains undrained
 		}
@@ -226,7 +238,26 @@ func (d *daemon) ensureWakeLoop() {
 }
 
 func wakeIngress() error {
-	return exec.Command("am", "start-foreground-service", "--user", "0", "-a", ingressAction, "-n", componentName).Run()
+	output, err := exec.Command("am", "start-foreground-service", "--user", "0", "-a", ingressAction, "-n", componentName).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.Join(strings.Fields(string(output)), " ")
+	if len(detail) > 120 {
+		detail = detail[:120]
+	}
+	if detail == "" {
+		return fmt.Errorf("root ingress start failed: %w", err)
+	}
+	return fmt.Errorf("root ingress start failed: %w: %s", err, detail)
+}
+
+func waitForInboxDrain(path string, grace time.Duration) bool {
+	deadline := time.Now().Add(grace)
+	for pendingInbox(path) > 0 && time.Now().Before(deadline) {
+		time.Sleep(ingressDrainPoll)
+	}
+	return pendingInbox(path) == 0
 }
 
 func (d *daemon) writeStatus(state string, cause error, connectedAt int64) {
@@ -245,7 +276,8 @@ func (d *daemon) writeStatus(state string, cause error, connectedAt int64) {
 	}
 	value := status{
 		Schema: 1, Generation: cfg.Generation, State: state, LastConnectedAt: connectedAt,
-		LastEventAt: lastEvent, PendingInbox: pendingInbox(filepath.Join(d.rootDir, "inbox")), LastError: message,
+		LastEventAt: lastEvent, PendingInbox: pendingInbox(filepath.Join(d.rootDir, "inbox")),
+		RejectedInbox: pendingInbox(filepath.Join(d.rootDir, "rejected")), LastError: message,
 	}
 	encoded, _ := json.Marshal(value)
 	path := filepath.Join(d.rootDir, "status.json")

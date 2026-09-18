@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import dev.chanooh.alert.alert.AlertDispatcher
 import dev.chanooh.alert.alert.AlertEvent
+import dev.chanooh.alert.alert.DispatchResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,10 +35,13 @@ class RootIngressService : Service() {
                         RootTransportFiles.deleteInboxEntry(entry)
                         return@forEach
                     }
-                    // Invalid signatures are discarded locally but deliberately
-                    // not ACKed, so the server retains its pending diagnostic state.
-                    runCatching { dispatcher.handle(event) }
-                        .onSuccess { RootTransportFiles.deleteInboxEntry(entry) }
+                    when (runCatching { dispatcher.handle(event) }.getOrNull()) {
+                        DispatchResult.PROCESSED, DispatchResult.DUPLICATE ->
+                            RootTransportFiles.deleteInboxEntry(entry)
+                        DispatchResult.REJECTED ->
+                            RootTransportFiles.quarantineRejectedInboxEntry(applicationContext, entry, event.id)
+                        null -> Unit // Leave it durable for Guardian's bounded retry.
+                    }
                 }
             } finally {
                 if (wakeLock.isHeld) wakeLock.release()
