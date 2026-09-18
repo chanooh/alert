@@ -16,11 +16,16 @@ Root-owned, persistent MQTT transport for Alert 0.3+.
 
 ## Power and recovery model
 
-At idle, this is one native MQTT socket with a 300-second keepalive. There is
+At idle, this is one native MQTT socket with a 60-second keepalive. There is
 no Android MQTT foreground service, heartbeat loop or periodic `dumpsys`.
 Configuration changes use filesystem notifications. If an event cannot be
 drained by Android, only the non-empty inbox is retried once a minute. The shell
 supervisor uses exponential backoff only if the daemon exits unexpectedly.
+
+The daemon also owns reconnects itself: a broken TCP/MQTT ping or network
+switch closes the old socket and creates one fresh connection with a bounded
+5-second-to-5-minute backoff. This prevents a stale client from remaining
+apparently connected for hours after a Wi-Fi/NAT path fails.
 
 The module applies best-effort Doze/AppOps allowances at boot. It does not hook
 SystemUI, patch Xiaomi databases, modify framework code or hold a continuous

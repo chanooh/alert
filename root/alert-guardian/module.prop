@@ -1,7 +1,7 @@
 id=alert_guardian
 name=Alert Guardian
-version=0.4.4
-versionCode=9
+version=0.4.5
+versionCode=10
 author=chanooh
 summary=Root-owned persistent MQTT transport and status console for Alert
 description=Runs a low-power native MQTT daemon outside HyperOS app freezing and wakes Alert only for signed events.

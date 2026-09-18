@@ -20,10 +20,16 @@ import (
 )
 
 const (
-	packageName       = "dev.chanooh.alert"
-	componentName     = "dev.chanooh.alert/.transport.RootIngressService"
-	ingressAction     = "dev.chanooh.alert.action.ROOT_DRAIN"
-	keepAlive         = 300 * time.Second
+	packageName   = "dev.chanooh.alert"
+	componentName = "dev.chanooh.alert/.transport.RootIngressService"
+	ingressAction = "dev.chanooh.alert.action.ROOT_DRAIN"
+	// One MQTT ping a minute is negligible on Wi-Fi/mobile data, but bounds a
+	// silent radio/NAT failure to about 75 seconds.  Five minutes allowed a
+	// dead TCP path to look connected for far too long on HyperOS overnight.
+	keepAlive         = 60 * time.Second
+	pingTimeout       = 15 * time.Second
+	initialBackoff    = 5 * time.Second
+	maximumBackoff    = 5 * time.Minute
 	ingressDrainGrace = 5 * time.Second
 	ingressDrainPoll  = 250 * time.Millisecond
 )
@@ -74,6 +80,7 @@ func main() {
 // run only blocks on MQTT callbacks or inotify configuration events. It has
 // no periodic health poll while the inbox is empty and the configuration is stable.
 func (d *daemon) run() error {
+	backoff := initialBackoff
 	for {
 		cfg, err := readConfig(filepath.Join(d.rootDir, "config.json"))
 		if err != nil || !cfg.Enabled {
@@ -83,22 +90,44 @@ func (d *daemon) run() error {
 			continue
 		}
 		d.setConfig(cfg)
-		if err := d.runClient(cfg); err != nil {
+		connected, err := d.runClient(cfg)
+		if err != nil {
 			d.writeStatus("backoff", err, 0)
-			waitForConfigChangeOrTimeout(filepath.Join(d.rootDir, "config.json"), 5*time.Second)
+			// A socket that reached SUBACK before later dropping gets an
+			// immediate fresh attempt; only consecutive initial failures back
+			// off exponentially.
+			if connected {
+				backoff = initialBackoff
+			}
+			waitForConfigChangeOrTimeout(filepath.Join(d.rootDir, "config.json"), backoff)
+			if !connected {
+				backoff *= 2
+				if backoff > maximumBackoff {
+					backoff = maximumBackoff
+				}
+			}
+		} else {
+			// Configuration changed.  A newly supplied endpoint should be tried
+			// promptly rather than inheriting an old network-failure backoff.
+			backoff = initialBackoff
 		}
 	}
 }
 
-func (d *daemon) runClient(cfg config) error {
+// runClient owns exactly one MQTT socket.  Paho automatic reconnect is
+// intentionally disabled: it can remain in an opaque reconnect state after a
+// radio/NAT failure, while this outer state machine records every failure and
+// recreates the socket with bounded exponential backoff.
+func (d *daemon) runClient(cfg config) (bool, error) {
 	changed := make(chan struct{}, 1)
-	subscriptionFailure := make(chan error, 1)
+	connectionLost := make(chan error, 1)
 	options := mqtt.NewClientOptions().
 		AddBroker(cfg.Broker).
 		SetClientID("alert-root-" + cfg.DeviceID).
 		SetCleanSession(false).
 		SetKeepAlive(keepAlive).
-		SetAutoReconnect(true).
+		SetPingTimeout(pingTimeout).
+		SetAutoReconnect(false).
 		// Initial connections are driven by the outer state machine instead of
 		// Paho's unbounded ConnectRetry. A configuration or TLS failure must be
 		// surfaced as a backoff error instead of looking "connecting" forever.
@@ -108,39 +137,32 @@ func (d *daemon) runClient(cfg config) error {
 	if cfg.Username != "" {
 		options.SetUsername(cfg.Username).SetPassword(cfg.Password)
 	}
-	options.OnConnectionLost = func(_ mqtt.Client, err error) { d.writeStatus("backoff", err, 0) }
-	options.OnReconnecting = func(_ mqtt.Client, _ *mqtt.ClientOptions) { d.writeStatus("connecting", nil, 0) }
-	options.OnConnect = func(client mqtt.Client) {
-		token := client.Subscribe("alert/"+cfg.DeviceID+"/events", 1, func(_ mqtt.Client, message mqtt.Message) {
-			d.receive(message.Payload())
-		})
-		if !token.WaitTimeout(20 * time.Second) {
-			d.writeStatus("backoff", errors.New("subscribe timeout"), 0)
-			select {
-			case subscriptionFailure <- errors.New("subscribe timeout"):
-			default:
-			}
-			return
+	options.OnConnectionLost = func(_ mqtt.Client, err error) {
+		d.writeStatus("backoff", err, 0)
+		select {
+		case connectionLost <- err:
+		default:
 		}
-		if token.Error() != nil {
-			d.writeStatus("backoff", token.Error(), 0)
-			select {
-			case subscriptionFailure <- token.Error():
-			default:
-			}
-			return
-		}
-		d.writeStatus("subscribed", nil, time.Now().UnixMilli())
 	}
 	client := mqtt.NewClient(options)
 	d.writeStatus("connecting", nil, 0)
 	if token := client.Connect(); !token.WaitTimeout(20 * time.Second) {
 		client.Disconnect(250)
-		return errors.New("connect timeout")
+		return false, errors.New("connect timeout")
 	} else if token.Error() != nil {
 		client.Disconnect(250)
-		return token.Error()
+		return false, token.Error()
 	}
+	if token := client.Subscribe("alert/"+cfg.DeviceID+"/events", 1, func(_ mqtt.Client, message mqtt.Message) {
+		d.receive(message.Payload())
+	}); !token.WaitTimeout(20 * time.Second) {
+		client.Disconnect(250)
+		return false, errors.New("subscribe timeout")
+	} else if token.Error() != nil {
+		client.Disconnect(250)
+		return false, token.Error()
+	}
+	d.writeStatus("subscribed", nil, time.Now().UnixMilli())
 
 	// Reconfiguration is detected by file metadata rather than a timer. A
 	// running Paho client owns its own socket/reconnect loop in the meantime.
@@ -151,10 +173,10 @@ func (d *daemon) runClient(cfg config) error {
 	select {
 	case <-changed:
 		client.Disconnect(250)
-		return nil
-	case err := <-subscriptionFailure:
+		return true, nil
+	case err := <-connectionLost:
 		client.Disconnect(250)
-		return err
+		return true, err
 	}
 }
 
