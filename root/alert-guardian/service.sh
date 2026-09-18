@@ -7,6 +7,17 @@ until [ "$(getprop sys.boot_completed)" = "1" ]; do
   sleep 5
 done
 
+# Alert stores the Root transport configuration in credential-encrypted app
+# storage.  `late_start` can run before the owner has performed the first
+# unlock after a reboot; at that point /data/user/0 may look like a valid but
+# empty directory.  Starting the daemon then would make it wait indefinitely
+# for an inotify event that unlocking does not produce.  Wait only through
+# direct boot, then start the normal event-driven daemon once user 0's CE
+# storage is available.  This does not create an idle wake loop after unlock.
+until [ "$(getprop sys.user.0.ce_available)" = "true" ]; do
+  sleep 5
+done
+
 apply_best_effort_policy
 log "guardian started; root MQTT supervisor enabled"
 

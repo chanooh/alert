@@ -26,6 +26,12 @@ The module applies best-effort Doze/AppOps allowances at boot. It does not hook
 SystemUI, patch Xiaomi databases, modify framework code or hold a continuous
 WakeLock.
 
+After a reboot, Android keeps Alert's credential-encrypted Root configuration
+unavailable until the first device unlock. Guardian waits during that direct-
+boot interval and starts the MQTT daemon within five seconds of the first
+unlock. It does not mistake the temporarily unavailable configuration for a
+disabled transport or wait indefinitely for a file-change event.
+
 ## Install and switch
 
 Install the CI-produced ZIP in KernelSU Manager and reboot. Then open Alert,
